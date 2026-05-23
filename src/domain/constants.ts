@@ -1,42 +1,38 @@
-import type { BoardColumn, ExecutionMode, ModelProvider } from "./types";
+import type { BoardColumn, ExecutionMode, ModelProvider, TaskPriority } from "./types";
 
 export const BOARD_COLUMNS: BoardColumn[] = [
   {
-    id: "my-skill",
-    title: "My Skill",
-    description: "Reusable skill.md presets"
-  },
-  {
     id: "my-plan",
     title: "My Plan",
-    description: "Implementation plans"
-  },
-  {
-    id: "skill-used",
-    title: "Skill Used",
-    description: "Prepared agent context"
+    description: "Backlog and task planning"
   },
   {
     id: "start-implement",
     title: "Start Implement",
-    description: "Execution preview"
+    description: "Queue and implementation setup"
   },
   {
     id: "in-process",
     title: "In Process",
-    description: "Running tasks"
+    description: "Running AI sessions"
   },
   {
     id: "in-review",
     title: "In Review",
-    description: "Review and approve"
+    description: "Human approval gate"
   },
   {
-    id: "successfully",
-    title: "Successfully",
-    description: "Approved work"
+    id: "done",
+    title: "Done",
+    description: "Approved results"
   }
 ];
+
+export const USER_CREATABLE_COLUMNS = ["my-plan", "start-implement"];
+
+export const USER_MOVABLE_COLUMNS = ["my-plan", "start-implement"];
+
+export const TASK_PRIORITIES: TaskPriority[] = ["Critical", "High", "Normal", "Low"];
 
 export const EXECUTION_MODES: ExecutionMode[] = [
   "Plan Only",

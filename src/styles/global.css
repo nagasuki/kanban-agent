@@ -890,8 +890,7 @@ label {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 16%, transparent);
 }
 
-.status-dot.my-skill,
-.status-dot.successfully {
+.status-dot.done {
   background: var(--success);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 16%, transparent);
 }
@@ -948,6 +947,18 @@ label {
 .column-empty {
   color: var(--muted);
   font-size: 11px;
+}
+
+.system-column-note {
+  display: grid;
+  min-height: 34px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .open-detail-hint {

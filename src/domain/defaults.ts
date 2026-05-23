@@ -1,5 +1,12 @@
 import { createId, nowIso } from "./id";
-import type { ActivityLogEntry, CliToolProfile, ProjectContext, ReviewChecklist, SafetySettings } from "./types";
+import type {
+  ActivityLogEntry,
+  CliToolProfile,
+  ProjectContext,
+  ReviewChecklist,
+  SafetySettings,
+  ValidationRules
+} from "./types";
 
 export const createDefaultSafetySettings = (): SafetySettings => ({
   previewDiffBeforeApply: true,
@@ -17,6 +24,13 @@ export const createDefaultReviewChecklist = (): ReviewChecklist => ({
   noRiskyFileChanged: false,
   summaryIsClear: false,
   userApproved: false
+});
+
+export const createDefaultValidationRules = (): ValidationRules => ({
+  runBuild: false,
+  runLint: false,
+  runTests: false,
+  checkFormatting: false
 });
 
 export const createDefaultProjectContext = (repoPath = ""): ProjectContext => ({

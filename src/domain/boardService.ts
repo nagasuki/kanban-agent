@@ -2,11 +2,19 @@ import {
   createDefaultProjectContext,
   createDefaultReviewChecklist,
   createDefaultSafetySettings,
+  createDefaultValidationRules,
   createLogEntry
 } from "./defaults";
 import { buildExecutionPreview, createImplementationLogBurst } from "./executionService";
 import { createId, nowIso } from "./id";
-import type { BoardColumnId, KanbanCard, Workspace } from "./types";
+import type {
+  BoardColumnId,
+  ImplementationSession,
+  KanbanCard,
+  SessionRetryMode,
+  ValidationResult,
+  Workspace
+} from "./types";
 
 export interface MoveCardResult {
   workspace: Workspace;
@@ -14,6 +22,10 @@ export interface MoveCardResult {
 }
 
 export const createCard = (workspace: Workspace, columnId: BoardColumnId): Workspace => {
+  if (!canUserCreateCard(columnId)) {
+    return workspace;
+  }
+
   const timestamp = nowIso();
   const defaultAgent = workspace.agentProfiles.find((profile) => profile.id === workspace.defaultAgentProfileId);
   const card: KanbanCard = {
@@ -28,6 +40,12 @@ export const createCard = (workspace: Workspace, columnId: BoardColumnId): Works
     agentProfileId: defaultAgent?.id,
     cliToolProfileId: defaultAgent?.defaultCliToolProfileId || workspace.defaultCliToolProfileId || undefined,
     executionMode: defaultAgent?.defaultExecutionMode ?? "Suggest Patch",
+    priority: "Normal",
+    dependencyCardIds: [],
+    validationRules: createDefaultValidationRules(),
+    sessions: [],
+    activeSessionId: undefined,
+    rejectCount: 0,
     projectContext: createDefaultProjectContext(workspace.repoPath),
     safetySettings: createDefaultSafetySettings(),
     reviewChecklist: createDefaultReviewChecklist(),
@@ -110,10 +128,10 @@ export const moveCard = (workspace: Workspace, cardId: string, targetColumnId: B
     return { workspace };
   }
 
-  if (targetColumnId === "successfully" && !card.reviewChecklist.userApproved) {
+  if (!canUserMoveCard(card.columnId, targetColumnId)) {
     return {
-      workspace: appendCardLog(workspace, cardId, "Successfully requires review approval first", "warning"),
-      warning: "Approve the review checklist before moving this card to Successfully."
+      workspace: appendCardLog(workspace, cardId, `Manual move to ${targetColumnId} is blocked`, "warning"),
+      warning: "Only My Plan and Start Implement can be moved manually. In Process, In Review, and Done are system-controlled."
     };
   }
 
@@ -128,14 +146,6 @@ export const moveCard = (workspace: Workspace, cardId: string, targetColumnId: B
       ...item,
       columnId: targetColumnId,
       activityLog: logs,
-      resultSummary:
-        targetColumnId === "in-review" && !item.resultSummary
-          ? "Simulated implementation completed. Review the checklist, logs, and placeholder diff."
-          : item.resultSummary,
-      diffPlaceholder:
-        targetColumnId === "in-review" && !item.diffPlaceholder
-          ? "Diff placeholder: no files changed yet because AI execution is not connected."
-          : item.diffPlaceholder,
       updatedAt: timestamp
     };
   });
@@ -148,6 +158,13 @@ export const moveCard = (workspace: Workspace, cardId: string, targetColumnId: B
     }
   };
 };
+
+export const canUserCreateCard = (columnId: BoardColumnId): boolean =>
+  columnId === "my-plan" || columnId === "start-implement";
+
+export const canUserMoveCard = (sourceColumnId: BoardColumnId, targetColumnId: BoardColumnId): boolean =>
+  (sourceColumnId === "my-plan" || sourceColumnId === "start-implement") &&
+  (targetColumnId === "my-plan" || targetColumnId === "start-implement");
 
 export const appendCardLog = (
   workspace: Workspace,
@@ -162,6 +179,16 @@ export const appendCardLog = (
       card.id === cardId
         ? {
             ...card,
+            sessions: card.sessions.map((session) =>
+              session.id === card.activeSessionId
+                ? {
+                    ...session,
+                    currentStep: message,
+                    logs: [...session.logs, createLogEntry(message, level)],
+                    updatedAt: timestamp
+                  }
+                : session
+            ),
             activityLog: [...card.activityLog, createLogEntry(message, level)],
             updatedAt: timestamp
           }
@@ -178,7 +205,7 @@ export const applyReviewAction = (
 ): Workspace => {
   const messages = {
     approve: "Review approved",
-    "request-changes": "Changes requested",
+    "request-changes": "Session rejected",
     retry: "Retry requested",
     rollback: "Rollback requested"
   };
@@ -193,7 +220,10 @@ export const applyReviewAction = (
 
       return {
         ...card,
-        columnId: action === "retry" ? "start-implement" : card.columnId,
+        columnId: action === "approve" ? "done" : action === "request-changes" ? "my-plan" : action === "retry" ? "start-implement" : card.columnId,
+        activeSessionId: action === "approve" || action === "request-changes" ? undefined : card.activeSessionId,
+        rejectCount: action === "request-changes" ? card.rejectCount + 1 : card.rejectCount,
+        sessions: updateLatestReviewableSession(card, action),
         reviewChecklist:
           action === "approve"
             ? {
@@ -201,7 +231,12 @@ export const applyReviewAction = (
                 userApproved: true,
                 summaryIsClear: true
               }
-            : card.reviewChecklist,
+            : action === "request-changes"
+              ? {
+                  ...card.reviewChecklist,
+                  userApproved: false
+                }
+              : card.reviewChecklist,
         activityLog: [...card.activityLog, createLogEntry(messages[action], action === "approve" ? "success" : "info")],
         updatedAt: timestamp
       };
@@ -210,53 +245,65 @@ export const applyReviewAction = (
   };
 };
 
-export const simulateExecution = (workspace: Workspace, cardId: string): Workspace => {
+export const simulateExecution = (workspace: Workspace, cardId: string): MoveCardResult => {
   const timestamp = nowIso();
+  const card = workspace.cards.find((item) => item.id === cardId);
+  if (!card) {
+    return { workspace };
+  }
+
+  if (card.columnId !== "in-process") {
+    const started = startImplementationSession(workspace, cardId, "fresh", [
+      createLogEntry("Fake runner started"),
+      createLogEntry("Implementation started"),
+      ...createImplementationLogBurst()
+    ]);
+    return started.warning ? started : { workspace: started.workspace };
+  }
+
   return {
-    ...workspace,
-    cards: workspace.cards.map((card) => {
+    workspace: {
+      ...workspace,
+      cards: workspace.cards.map((item) => {
+      const card = item;
       if (card.id !== cardId) {
         return card;
       }
 
-      if (card.columnId !== "in-process") {
-        return {
-          ...card,
-          columnId: "in-process",
-          locked: true,
-          activityLog: [
-            ...card.activityLog,
-            createLogEntry("Fake runner started"),
-            createLogEntry("Implementation started"),
-            ...createImplementationLogBurst()
-          ],
-          updatedAt: timestamp
-        };
-      }
-
+      const summary =
+        card.resultSummary ||
+        "Fake runner completed. The task is ready for human review before any real file operations exist.";
+      const diffText =
+        card.diffPlaceholder ||
+        "Diff placeholder: fake runner generated no real patch. Future Suggest Patch mode will populate this.";
       return {
         ...card,
         columnId: "in-review",
-        resultSummary:
-          card.resultSummary ||
-          "Fake runner completed. The task is ready for human review before any real file operations exist.",
-        diffPlaceholder:
-          card.diffPlaceholder ||
-          "Diff placeholder: fake runner generated no real patch. Future Suggest Patch mode will populate this.",
+        locked: false,
+        resultSummary: summary,
+        diffPlaceholder: diffText,
+        sessions: completeActiveSession(card, {
+          status: "completed",
+          summary,
+          diffText,
+          currentStep: "Waiting for review",
+          completedAt: timestamp,
+          extraLogs: [
+            createLogEntry("Fake runner generated result summary"),
+            createLogEntry("Implementation completed and ready for review", "success")
+          ]
+        }),
         reviewChecklist: {
           ...card.reviewChecklist,
           scopeMatchesPlan: true,
           summaryIsClear: true
         },
-        activityLog: [
-          ...card.activityLog,
-          createLogEntry("Fake runner generated result summary"),
-          createLogEntry("Implementation completed and ready for review", "success")
-        ],
+        activityLog: [...card.activityLog, createLogEntry("Implementation completed and ready for review", "success")],
         updatedAt: timestamp
       };
     }),
     updatedAt: timestamp
+    }
   };
 };
 
@@ -269,6 +316,15 @@ export const cancelExecution = (workspace: Workspace, cardId: string): Workspace
         ? {
             ...card,
             columnId: "start-implement",
+            locked: false,
+            sessions: completeActiveSession(card, {
+              status: "cancelled",
+              summary: "Execution cancelled by user.",
+              diffText: card.diffPlaceholder,
+              currentStep: "Cancelled",
+              completedAt: timestamp,
+              extraLogs: [createLogEntry("Execution cancelled", "warning")]
+            }),
             activityLog: [...card.activityLog, createLogEntry("Execution cancelled", "warning")],
             updatedAt: timestamp
           }
@@ -278,27 +334,15 @@ export const cancelExecution = (workspace: Workspace, cardId: string): Workspace
   };
 };
 
-export const startPlanOnlyExecution = (workspace: Workspace, cardId: string): Workspace => {
-  const timestamp = nowIso();
-  return {
-    ...workspace,
-    cards: workspace.cards.map((card) =>
-      card.id === cardId
-        ? {
-            ...card,
-            columnId: "in-process",
-            activityLog: [
-              ...card.activityLog,
-              createLogEntry("Plan Only execution started"),
-              createLogEntry("Building prompt from plan, skills, and project context")
-            ],
-            updatedAt: timestamp
-          }
-        : card
-    ),
-    updatedAt: timestamp
-  };
-};
+export const startPlanOnlyExecution = (
+  workspace: Workspace,
+  cardId: string,
+  retryMode: SessionRetryMode = "fresh"
+): MoveCardResult =>
+  startImplementationSession(workspace, cardId, retryMode, [
+    createLogEntry("API model execution started"),
+    createLogEntry("Building prompt from plan, skills, and project context")
+  ]);
 
 export const completePlanOnlyExecution = (
   workspace: Workspace,
@@ -317,6 +361,17 @@ export const completePlanOnlyExecution = (
             resultSummary: result.summary,
             diffPlaceholder: result.rawText,
             patchText: card.executionMode === "Suggest Patch" ? result.rawText : card.patchText,
+            sessions: completeActiveSession(card, {
+              status: "completed",
+              summary: result.summary,
+              diffText: result.rawText,
+              currentStep: "Waiting for review",
+              completedAt: timestamp,
+              extraLogs: [
+                createLogEntry(`Plan Only response received from ${result.provider}`, "success"),
+                createLogEntry("Implementation completed and ready for review", "success")
+              ]
+            }),
             reviewChecklist: {
               ...card.reviewChecklist,
               scopeMatchesPlan: true,
@@ -335,24 +390,11 @@ export const completePlanOnlyExecution = (
   };
 };
 
-export const startCliExecution = (workspace: Workspace, cardId: string): Workspace => {
-  const timestamp = nowIso();
-  return {
-    ...workspace,
-    cards: workspace.cards.map((card) =>
-      card.id === cardId
-        ? {
-            ...card,
-            columnId: "in-process",
-            locked: true,
-            activityLog: [...card.activityLog, createLogEntry("CLI agent execution started")],
-            updatedAt: timestamp
-          }
-        : card
-    ),
-    updatedAt: timestamp
-  };
-};
+export const startCliExecution = (
+  workspace: Workspace,
+  cardId: string,
+  retryMode: SessionRetryMode = "fresh"
+): MoveCardResult => startImplementationSession(workspace, cardId, retryMode, [createLogEntry("CLI agent execution started")]);
 
 export const completeCliExecution = (
   workspace: Workspace,
@@ -371,6 +413,20 @@ export const completeCliExecution = (
             resultSummary: result.summary,
             diffPlaceholder: result.rawText,
             patchText: card.executionMode === "Suggest Patch" ? result.rawText : card.patchText,
+            sessions: completeActiveSession(card, {
+              status: result.ok ? "completed" : "failed",
+              summary: result.summary,
+              diffText: result.rawText,
+              currentStep: "Waiting for review",
+              completedAt: timestamp,
+              extraLogs: [
+                createLogEntry(
+                  `CLI agent ${result.provider} finished${result.ok ? "" : " with errors"}`,
+                  result.ok ? "success" : "warning"
+                ),
+                createLogEntry("CLI output saved for review", result.ok ? "success" : "warning")
+              ]
+            }),
             reviewChecklist: {
               ...card.reviewChecklist,
               scopeMatchesPlan: result.ok,
@@ -468,6 +524,10 @@ export const recordCommandResult = (
         testOutput: kind === "test" ? result.output : card.testOutput,
         buildOutput: kind === "build" ? result.output : card.buildOutput,
         applyOutput: kind === "commit" || kind === "rollback" ? result.output : card.applyOutput,
+        sessions:
+          kind === "test" || kind === "build"
+            ? updateLatestSessionValidation(card, kind === "test" ? "Tests" : "Build", result.ok, result.output)
+            : card.sessions,
         reviewChecklist: {
           ...card.reviewChecklist,
           buildTestPassed: kind === "test" || kind === "build" ? result.ok : card.reviewChecklist.buildTestPassed
@@ -531,17 +591,212 @@ const logsForMove = (card: KanbanCard, targetColumnId: BoardColumnId, workspace:
     ];
   }
 
-  if (targetColumnId === "in-process") {
-    return [createLogEntry("Implementation started"), ...createImplementationLogBurst()];
-  }
-
-  if (targetColumnId === "in-review") {
-    return [createLogEntry("Implementation completed and ready for review", "success")];
-  }
-
-  if (targetColumnId === "successfully") {
-    return [createLogEntry("Work marked successfully completed", "success")];
-  }
-
   return [createLogEntry(`Moved to ${targetColumnId}`)];
+};
+
+const startImplementationSession = (
+  workspace: Workspace,
+  cardId: string,
+  retryMode: SessionRetryMode,
+  initialLogs: ReturnType<typeof createLogEntry>[]
+): MoveCardResult => {
+  const card = workspace.cards.find((item) => item.id === cardId);
+  if (!card) {
+    return { workspace };
+  }
+
+  if (card.columnId !== "start-implement") {
+    return {
+      workspace: appendCardLog(workspace, cardId, "Implementation can only start from Start Implement", "warning"),
+      warning: "Move the card to Start Implement before starting a session."
+    };
+  }
+
+  const blockedDependency = card.dependencyCardIds
+    .map((dependencyId) => workspace.cards.find((item) => item.id === dependencyId))
+    .find((dependency) => dependency && dependency.columnId !== "done");
+
+  if (blockedDependency) {
+    return {
+      workspace: appendCardLog(workspace, cardId, `Blocked by dependency: ${blockedDependency.title}`, "warning"),
+      warning: `This task is blocked by dependency: ${blockedDependency.title}.`
+    };
+  }
+
+  const timestamp = nowIso();
+  const model = workspace.modelProfiles.find((profile) => profile.id === card.modelProfileId);
+  const cliTool = workspace.cliToolProfiles.find((profile) => profile.id === card.cliToolProfileId);
+  const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
+  const session = createImplementationSession(card, workspace, buildExecutionPreview(card, model, skills, cliTool), retryMode, initialLogs);
+
+  return {
+    workspace: {
+      ...workspace,
+      cards: workspace.cards.map((item) =>
+        item.id === cardId
+          ? {
+              ...item,
+              columnId: "in-process",
+              locked: true,
+              activeSessionId: session.id,
+              sessions: [...item.sessions, session],
+              activityLog: [...item.activityLog, ...initialLogs],
+              updatedAt: timestamp
+            }
+          : item
+      ),
+      updatedAt: timestamp
+    }
+  };
+};
+
+const createImplementationSession = (
+  card: KanbanCard,
+  workspace: Workspace,
+  promptPreview: string,
+  retryMode: SessionRetryMode,
+  initialLogs: ReturnType<typeof createLogEntry>[]
+): ImplementationSession => {
+  const timestamp = nowIso();
+  const attemptNumber = card.sessions.length + 1;
+  return {
+    id: createId("session"),
+    cardId: card.id,
+    attemptNumber,
+    status: "running",
+    retryMode,
+    selectedAgentProfileId: card.agentProfileId,
+    runnerType: card.runnerType,
+    modelProfileId: card.modelProfileId,
+    cliToolProfileId: card.cliToolProfileId || workspace.defaultCliToolProfileId || undefined,
+    contextSnapshot: {
+      title: card.title,
+      description: card.description,
+      skillIds: [...card.skillIds],
+      executionMode: card.executionMode,
+      projectContext: { ...card.projectContext },
+      safetySettings: { ...card.safetySettings },
+      validationRules: { ...card.validationRules },
+      priority: card.priority,
+      dependencyCardIds: [...card.dependencyCardIds]
+    },
+    promptPreview,
+    logs: initialLogs,
+    currentStep: initialLogs.at(-1)?.message ?? "Session started",
+    changedFiles: [],
+    diffText: "",
+    summary: "",
+    validationResults: createValidationResults(card),
+    tokenUsage: {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      costUsd: 0
+    },
+    durationSeconds: 0,
+    startedAt: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+};
+
+const createValidationResults = (card: KanbanCard): ValidationResult[] => {
+  const timestamp = nowIso();
+  const rules = [
+    ["Build", card.validationRules.runBuild],
+    ["Lint", card.validationRules.runLint],
+    ["Tests", card.validationRules.runTests],
+    ["Formatting", card.validationRules.checkFormatting]
+  ] as const;
+
+  return rules.map(([name, enabled]) => ({
+    id: createId("validation"),
+    name,
+    status: enabled ? "pending" : "skipped",
+    output: enabled ? "Waiting for validation." : "Validation disabled for this session.",
+    completedAt: enabled ? undefined : timestamp
+  }));
+};
+
+const completeActiveSession = (
+  card: KanbanCard,
+  updates: {
+    status: ImplementationSession["status"];
+    summary: string;
+    diffText: string;
+    currentStep: string;
+    completedAt: string;
+    extraLogs: ReturnType<typeof createLogEntry>[];
+  }
+): ImplementationSession[] =>
+  card.sessions.map((session) =>
+    session.id === card.activeSessionId
+      ? {
+          ...session,
+          status: updates.status,
+          summary: updates.summary,
+          diffText: updates.diffText,
+          currentStep: updates.currentStep,
+          logs: [...session.logs, ...updates.extraLogs],
+          durationSeconds: Math.max(
+            0,
+            Math.round((new Date(updates.completedAt).getTime() - new Date(session.startedAt).getTime()) / 1000)
+          ),
+          completedAt: updates.completedAt,
+          updatedAt: updates.completedAt
+        }
+      : session
+  );
+
+const updateLatestReviewableSession = (
+  card: KanbanCard,
+  action: "approve" | "request-changes" | "retry" | "rollback"
+): ImplementationSession[] => {
+  if (action !== "approve" && action !== "request-changes") {
+    return card.sessions;
+  }
+
+  const timestamp = nowIso();
+  const targetSessionId = card.activeSessionId ?? card.sessions.at(-1)?.id;
+  return card.sessions.map((session) =>
+    session.id === targetSessionId
+      ? {
+          ...session,
+          status: action === "approve" ? "approved" : "rejected",
+          logs: [
+            ...session.logs,
+            createLogEntry(action === "approve" ? "Session approved by user" : "Session rejected by user", action === "approve" ? "success" : "warning")
+          ],
+          updatedAt: timestamp
+        }
+      : session
+  );
+};
+
+const updateLatestSessionValidation = (
+  card: KanbanCard,
+  validationName: "Tests" | "Build",
+  ok: boolean,
+  output: string
+): ImplementationSession[] => {
+  const timestamp = nowIso();
+  const targetSessionId = card.activeSessionId ?? card.sessions.at(-1)?.id;
+  return card.sessions.map((session) =>
+    session.id === targetSessionId
+      ? {
+          ...session,
+          validationResults: session.validationResults.map((result) =>
+            result.name === validationName
+              ? {
+                  ...result,
+                  status: ok ? "passed" : "failed",
+                  output,
+                  completedAt: timestamp
+                }
+              : result
+          ),
+          updatedAt: timestamp
+        }
+      : session
+  );
 };

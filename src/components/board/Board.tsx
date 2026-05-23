@@ -1,5 +1,6 @@
 import { Plus } from "lucide-react";
 import { BOARD_COLUMNS } from "../../domain/constants";
+import { canUserCreateCard } from "../../domain/boardService";
 import type { BoardColumnId, Workspace } from "../../domain/types";
 import { KanbanCardItem } from "../cards/KanbanCardItem";
 
@@ -67,10 +68,14 @@ export const Board = ({
               <span className="count-badge">{cards.length}</span>
             </header>
 
-            <button className="column-add" type="button" onClick={() => onCreateCard(column.id)}>
-              <Plus size={16} />
-              New card
-            </button>
+            {canUserCreateCard(column.id) ? (
+              <button className="column-add" type="button" onClick={() => onCreateCard(column.id)}>
+                <Plus size={16} />
+                New card
+              </button>
+            ) : (
+              <div className="system-column-note">System controlled</div>
+            )}
 
             <div className="card-list">
               {cards.map((card) => (
@@ -82,7 +87,11 @@ export const Board = ({
                   onSelect={() => onSelectCard(card.id)}
                 />
               ))}
-              {cards.length === 0 ? <div className="column-empty">Drop cards here or create a new one.</div> : null}
+              {cards.length === 0 ? (
+                <div className="column-empty">
+                  {canUserCreateCard(column.id) ? "Drop cards here or create a new one." : "Cards appear here through the workflow."}
+                </div>
+              ) : null}
             </div>
           </article>
         );

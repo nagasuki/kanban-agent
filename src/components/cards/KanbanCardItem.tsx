@@ -39,6 +39,7 @@ export const KanbanCardItem = ({ card, workspace, isSelected, onSelect }: Kanban
       <div className="card-status-row">
         <span className={`status-dot ${card.columnId}`} />
         <span>{columnTitle}</span>
+        <span className="mini-badge">{card.priority}</span>
         {card.locked ? <span className="mini-badge warning-text">Running</span> : null}
       </div>
       <div className="card-title-row">
@@ -54,8 +55,9 @@ export const KanbanCardItem = ({ card, workspace, isSelected, onSelect }: Kanban
         </span>
         <span className="chip">
           <Clock3 size={13} />
-          {card.activityLog.length} logs
+          {card.sessions.length} sessions
         </span>
+        {card.rejectCount > 0 ? <span className="chip warning-text">{card.rejectCount} rejects</span> : null}
       </div>
 
       <div className="card-footer">
@@ -65,7 +67,7 @@ export const KanbanCardItem = ({ card, workspace, isSelected, onSelect }: Kanban
 
       <div className="open-detail-hint">Click to open details</div>
 
-      {card.columnId === "in-review" || card.columnId === "successfully" ? (
+      {card.columnId === "in-review" || card.columnId === "done" ? (
         <div className="review-meter">
           <ShieldCheck size={14} />
           {checklistDone}/6 review checks

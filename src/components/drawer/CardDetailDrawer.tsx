@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import { Copy, Play, RotateCcw, ShieldCheck, Trash2, Undo2, X } from "lucide-react";
-import { BOARD_COLUMNS, EXECUTION_MODES } from "../../domain/constants";
+import { BOARD_COLUMNS, EXECUTION_MODES, TASK_PRIORITIES } from "../../domain/constants";
 import { buildExecutionPreview } from "../../domain/executionService";
 import { buildAgentPrompt } from "../../domain/promptBuilder";
-import type { BoardColumnId, KanbanCard, Workspace } from "../../domain/types";
+import type { KanbanCard, SessionRetryMode, Workspace } from "../../domain/types";
 import { DiffViewer } from "../diff/DiffViewer";
 import { FileTreePicker } from "./FileTreePicker";
 
@@ -17,9 +17,9 @@ interface CardDetailModalProps {
   onReviewAction: (cardId: string, action: "approve" | "request-changes" | "retry" | "rollback") => void;
   onSimulateExecution: (cardId: string) => void;
   onCancelExecution: (cardId: string) => void;
-  onRunPlanOnly: (cardId: string) => void;
+  onRunPlanOnly: (cardId: string, retryMode?: SessionRetryMode) => void;
   onLoadAttachedFiles: (cardId: string) => void;
-  onRunCliAgent: (cardId: string) => void;
+  onRunCliAgent: (cardId: string, retryMode?: SessionRetryMode) => void;
   onApplyPatch: (cardId: string) => void;
   onRunWorkspaceCommand: (cardId: string, kind: "test" | "build") => void;
   onCommit: (cardId: string) => void;
@@ -85,14 +85,25 @@ export const CardDetailModal = ({
     return null;
   }
 
-  const selectedSkills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
+  const selectedAgent = workspace.agentProfiles.find((agent) => agent.id === card.agentProfileId);
+  const selectedSkillIds = selectedAgent?.skillIds ?? card.skillIds;
+  const selectedSkills = workspace.skills.filter((skill) => selectedSkillIds.includes(skill.id));
   const selectedModel = workspace.modelProfiles.find((model) => model.id === card.modelProfileId);
   const selectedCliTool = workspace.cliToolProfiles.find(
     (profile) => profile.id === (card.cliToolProfileId || workspace.defaultCliToolProfileId)
   );
-  const selectedAgent = workspace.agentProfiles.find((agent) => agent.id === card.agentProfileId);
   const executionPreview = buildExecutionPreview(card, selectedModel, selectedSkills, selectedCliTool);
   const generatedPrompt = buildAgentPrompt(card, workspace, selectedModel, selectedSkills, selectedAgent, selectedCliTool);
+  const activeSession = card.sessions.find((session) => session.id === card.activeSessionId);
+  const latestSession = activeSession ?? card.sessions.at(-1);
+  const canStartSession = card.columnId === "start-implement";
+  const startSession = (retryMode: SessionRetryMode = "fresh") => {
+    if (card.runnerType === "cli") {
+      onRunCliAgent(card.id, retryMode);
+      return;
+    }
+    onRunPlanOnly(card.id, retryMode);
+  };
   const applyAgentProfile = (agentId: string) => {
     const agent = workspace.agentProfiles.find((profile) => profile.id === agentId);
     onUpdateCard(
@@ -144,17 +155,30 @@ export const CardDetailModal = ({
 
       <div className="detail-modal-body">
       <div className="drawer-actions">
-        {card.runnerType === "cli" ? (
-          <button type="button" onClick={() => onRunCliAgent(card.id)}>
+        {canStartSession ? (
+          <button type="button" onClick={() => startSession("fresh")}>
             <Play size={15} />
-            Run CLI Agent
+            Implement
           </button>
-        ) : (
-          <button type="button" onClick={() => onRunPlanOnly(card.id)}>
-            <Play size={15} />
-            Run API Model
+        ) : null}
+        {card.columnId === "in-process" ? (
+          <button type="button" onClick={() => onCancelExecution(card.id)}>
+            <Undo2 size={15} />
+            Cancel Session
           </button>
-        )}
+        ) : null}
+        {card.columnId === "in-review" ? (
+          <>
+            <button type="button" onClick={() => onReviewAction(card.id, "approve")}>
+              <ShieldCheck size={15} />
+              Approve
+            </button>
+            <button type="button" onClick={() => onReviewAction(card.id, "request-changes")}>
+              <Undo2 size={15} />
+              Reject
+            </button>
+          </>
+        ) : null}
         {card.locked ? <span className="status-pill warning-text">Locked</span> : null}
         <button type="button" onClick={() => onApplyPatch(card.id)}>
           <Play size={15} />
@@ -187,24 +211,6 @@ export const CardDetailModal = ({
 
       <section className="drawer-section">
         <h3>Agent Context</h3>
-        <div className="checkbox-list">
-          {workspace.skills.map((skill) => (
-            <label className="checkbox-row" key={skill.id}>
-              <input
-                checked={card.skillIds.includes(skill.id)}
-                type="checkbox"
-                onChange={(event) => {
-                  const nextSkillIds = event.target.checked
-                    ? [...card.skillIds, skill.id]
-                    : card.skillIds.filter((id) => id !== skill.id);
-                  onUpdateCard(card.id, { skillIds: nextSkillIds });
-                }}
-              />
-              {skill.name}
-            </label>
-          ))}
-        </div>
-
         <label>
           Agent profile
           <select
@@ -219,6 +225,11 @@ export const CardDetailModal = ({
             ))}
           </select>
         </label>
+
+        <div className="repo-meta-row">
+          <span>Skills: {selectedSkills.length > 0 ? selectedSkills.map((skill) => skill.name).join(", ") : "No agent skills"}</span>
+          {card.rejectCount > 0 ? <span className="warning-text">{card.rejectCount} rejects</span> : null}
+        </div>
 
         <label>
           Runner
@@ -275,6 +286,85 @@ export const CardDetailModal = ({
             ))}
           </select>
         </label>
+      </section>
+
+      <section className="drawer-section">
+        <h3>Queue Settings</h3>
+        <label>
+          Priority
+          <select
+            value={card.priority}
+            onChange={(event) => onUpdateCard(card.id, { priority: event.target.value as KanbanCard["priority"] })}
+          >
+            {TASK_PRIORITIES.map((priority) => (
+              <option key={priority} value={priority}>
+                {priority}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Dependencies
+          <select
+            multiple
+            value={card.dependencyCardIds}
+            onChange={(event) =>
+              onUpdateCard(card.id, {
+                dependencyCardIds: Array.from(event.currentTarget.selectedOptions).map((option) => option.value)
+              })
+            }
+          >
+            {workspace.cards
+              .filter((item) => item.id !== card.id)
+              .map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.title} ({BOARD_COLUMNS.find((column) => column.id === item.columnId)?.title})
+                </option>
+              ))}
+          </select>
+        </label>
+        <div className="checkbox-list">
+          <label className="checkbox-row">
+            <input
+              checked={card.validationRules.runBuild}
+              type="checkbox"
+              onChange={(event) =>
+                onUpdateCard(card.id, { validationRules: { ...card.validationRules, runBuild: event.target.checked } })
+              }
+            />
+            Build validation
+          </label>
+          <label className="checkbox-row">
+            <input
+              checked={card.validationRules.runLint}
+              type="checkbox"
+              onChange={(event) =>
+                onUpdateCard(card.id, { validationRules: { ...card.validationRules, runLint: event.target.checked } })
+              }
+            />
+            Lint validation
+          </label>
+          <label className="checkbox-row">
+            <input
+              checked={card.validationRules.runTests}
+              type="checkbox"
+              onChange={(event) =>
+                onUpdateCard(card.id, { validationRules: { ...card.validationRules, runTests: event.target.checked } })
+              }
+            />
+            Unit tests
+          </label>
+          <label className="checkbox-row">
+            <input
+              checked={card.validationRules.checkFormatting}
+              type="checkbox"
+              onChange={(event) =>
+                onUpdateCard(card.id, { validationRules: { ...card.validationRules, checkFormatting: event.target.checked } })
+              }
+            />
+            Formatting check
+          </label>
+        </div>
       </section>
 
       <section className="drawer-section">
@@ -410,25 +500,64 @@ export const CardDetailModal = ({
           <h3>Execution Preview</h3>
           <pre>{executionPreview}</pre>
           <div className="review-actions">
-            {card.runnerType === "api" ? (
-              <button type="button" onClick={() => onRunPlanOnly(card.id)}>
-                <Play size={15} />
-                Run API Model
-              </button>
+            {card.columnId === "start-implement" ? (
+              <>
+                <button type="button" onClick={() => startSession("fresh")}>
+                  <Play size={15} />
+                  Start Fresh Session
+                </button>
+                {card.rejectCount > 0 ? (
+                  <button type="button" onClick={() => startSession("continue")}>
+                    <RotateCcw size={15} />
+                    Continue Existing Session
+                  </button>
+                ) : null}
+              </>
             ) : (
-              <button type="button" onClick={() => onRunCliAgent(card.id)}>
-                <Play size={15} />
-                Run CLI Agent
-              </button>
+              <>
+                <button type="button" onClick={() => onSimulateExecution(card.id)}>
+                  <Play size={15} />
+                  Finish Simulation
+                </button>
+                <button type="button" onClick={() => onCancelExecution(card.id)}>
+                  <Undo2 size={15} />
+                  Cancel
+                </button>
+              </>
             )}
-            <button type="button" onClick={() => onSimulateExecution(card.id)}>
-              <Play size={15} />
-              {card.columnId === "in-process" ? "Finish Simulation" : "Start Simulation"}
-            </button>
-            <button type="button" onClick={() => onCancelExecution(card.id)}>
-              <Undo2 size={15} />
-              Cancel
-            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {latestSession ? (
+        <section className="drawer-section">
+          <h3>Active Session</h3>
+          <div className="repo-status-grid">
+            <span>Session #{latestSession.attemptNumber}</span>
+            <span>{latestSession.status}</span>
+            <span>{latestSession.retryMode === "continue" ? "Continue" : "Fresh"}</span>
+            <span>{latestSession.currentStep}</span>
+            <span>{latestSession.durationSeconds}s</span>
+            <span>{latestSession.tokenUsage.totalTokens} tokens</span>
+            <span>${latestSession.tokenUsage.costUsd.toFixed(4)}</span>
+          </div>
+          <div className="repo-status-grid">
+            {latestSession.validationResults.map((result) => (
+              <span className={result.status === "failed" ? "warning-text" : result.status === "passed" ? "success-text" : ""} key={result.id}>
+                {result.name}: {result.status}
+              </span>
+            ))}
+          </div>
+          <div className="log-list">
+            {latestSession.logs
+              .slice()
+              .reverse()
+              .map((entry) => (
+                <div className={`log-entry ${entry.level}`} key={entry.id}>
+                  <span>{new Date(entry.timestamp).toLocaleString()}</span>
+                  <p>{entry.message}</p>
+                </div>
+              ))}
           </div>
         </section>
       ) : null}
@@ -460,24 +589,18 @@ export const CardDetailModal = ({
           ))}
         </div>
 
-        <div className="review-actions">
-          <button type="button" onClick={() => onReviewAction(card.id, "approve")}>
-            <ShieldCheck size={15} />
-            Approve
-          </button>
-          <button type="button" onClick={() => onReviewAction(card.id, "request-changes")}>
-            <Undo2 size={15} />
-            Request Changes
-          </button>
-          <button type="button" onClick={() => onReviewAction(card.id, "retry")}>
-            <RotateCcw size={15} />
-            Retry
-          </button>
-          <button type="button" onClick={() => onReviewAction(card.id, "rollback")}>
-            <Play size={15} />
-            Rollback
-          </button>
-        </div>
+        {card.columnId === "in-review" ? (
+          <div className="review-actions">
+            <button type="button" onClick={() => onReviewAction(card.id, "approve")}>
+              <ShieldCheck size={15} />
+              Approve
+            </button>
+            <button type="button" onClick={() => onReviewAction(card.id, "request-changes")}>
+              <Undo2 size={15} />
+              Reject
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <section className="drawer-section">
@@ -486,7 +609,7 @@ export const CardDetailModal = ({
           Summary
           <textarea
             rows={4}
-            value={card.resultSummary}
+            value={latestSession?.summary || card.resultSummary}
             onChange={(event) => onUpdateCard(card.id, { resultSummary: event.target.value })}
           />
         </label>
@@ -494,11 +617,11 @@ export const CardDetailModal = ({
           Patch text
           <textarea
             rows={6}
-            value={card.patchText || card.diffPlaceholder}
+            value={latestSession?.diffText || card.patchText || card.diffPlaceholder}
             onChange={(event) => onUpdateCard(card.id, { patchText: event.target.value })}
           />
         </label>
-        <DiffViewer value={card.patchText || card.diffPlaceholder} />
+        <DiffViewer value={latestSession?.diffText || card.patchText || card.diffPlaceholder} />
         <div className="review-actions">
           <button type="button" onClick={() => onRunWorkspaceCommand(card.id, "test")}>
             <Play size={15} />
@@ -582,7 +705,25 @@ export const CardDetailModal = ({
                 <span>{new Date(entry.timestamp).toLocaleString()}</span>
                 <p>{entry.message}</p>
               </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="drawer-section">
+        <h3>Session History</h3>
+        <div className="log-list">
+          {card.sessions
+            .slice()
+            .reverse()
+            .map((session) => (
+              <div className={`log-entry ${session.status === "approved" ? "success" : session.status === "rejected" || session.status === "failed" ? "warning" : "info"}`} key={session.id}>
+                <span>
+                  Session #{session.attemptNumber} / {session.status} / {session.retryMode}
+                </span>
+                <p>{session.summary || session.currentStep}</p>
+              </div>
             ))}
+          {card.sessions.length === 0 ? <p className="helper-text">No implementation sessions yet.</p> : null}
         </div>
       </section>
 

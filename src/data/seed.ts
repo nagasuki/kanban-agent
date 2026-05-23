@@ -3,10 +3,11 @@ import {
   createDefaultCliToolProfiles,
   createDefaultReviewChecklist,
   createDefaultSafetySettings,
+  createDefaultValidationRules,
   createLogEntry
 } from "../domain/defaults";
 import { createId, nowIso } from "../domain/id";
-import type { AppState, KanbanCard, ModelProfile, SkillPreset, Workspace } from "../domain/types";
+import type { AppState, ImplementationSession, KanbanCard, ModelProfile, SkillPreset, Workspace } from "../domain/types";
 
 export const createSeedState = (): AppState => {
   const timestamp = nowIso();
@@ -115,7 +116,7 @@ export const createSeedState = (): AppState => {
     }),
     createSeedCard({
       workspaceId,
-      columnId: "skill-used",
+      columnId: "start-implement",
       title: "Prepare review workflow",
       description: "Attach Code Reviewer and configure checklist state before moving cards into In Review.",
       skillIds: [skills[0].id],
@@ -189,8 +190,32 @@ const createSeedCard = (input: {
   targetPaths: string;
 }): KanbanCard => {
   const timestamp = nowIso();
+  const validationRules = createDefaultValidationRules();
+  const sessions =
+    input.columnId === "in-review"
+      ? [
+          createSeedSession({
+            cardId: "pending",
+            attemptNumber: 1,
+            timestamp,
+            status: "completed",
+            summary: "Simulated docs update is ready for review.",
+            diffText: "Diff placeholder: README.md would be updated.",
+            input,
+            validationRules
+          })
+        ]
+      : [];
+  const activeSessionId = sessions[0]?.id;
   return {
-    id: createId("card"),
+    id: (() => {
+      const cardId = createId("card");
+      sessions.forEach((session) => {
+        session.cardId = cardId;
+        session.contextSnapshot.title = input.title;
+      });
+      return cardId;
+    })(),
     workspaceId: input.workspaceId,
     columnId: input.columnId,
     title: input.title,
@@ -201,6 +226,12 @@ const createSeedCard = (input: {
     agentProfileId: undefined,
     cliToolProfileId: undefined,
     executionMode: "Suggest Patch",
+    priority: "Normal",
+    dependencyCardIds: [],
+    validationRules,
+    sessions,
+    activeSessionId,
+    rejectCount: 0,
     projectContext: {
       ...createDefaultProjectContext(input.repoPath),
       targetPaths: input.targetPaths,
@@ -229,3 +260,65 @@ const createSeedCard = (input: {
     updatedAt: timestamp
   };
 };
+
+const createSeedSession = (input: {
+  cardId: string;
+  attemptNumber: number;
+  timestamp: string;
+  status: ImplementationSession["status"];
+  summary: string;
+  diffText: string;
+  input: {
+    title: string;
+    description: string;
+    skillIds: string[];
+    modelProfileId: string;
+    runnerType: KanbanCard["runnerType"];
+    repoPath: string;
+    targetPaths: string;
+  };
+  validationRules: KanbanCard["validationRules"];
+}): ImplementationSession => ({
+  id: createId("session"),
+  cardId: input.cardId,
+  attemptNumber: input.attemptNumber,
+  status: input.status,
+  retryMode: "fresh",
+  selectedAgentProfileId: undefined,
+  runnerType: input.input.runnerType,
+  modelProfileId: input.input.modelProfileId,
+  cliToolProfileId: undefined,
+  contextSnapshot: {
+    title: input.input.title,
+    description: input.input.description,
+    skillIds: input.input.skillIds,
+    executionMode: "Suggest Patch",
+    projectContext: {
+      ...createDefaultProjectContext(input.input.repoPath),
+      targetPaths: input.input.targetPaths,
+      targetFolders: input.input.targetPaths
+    },
+    safetySettings: createDefaultSafetySettings(),
+    validationRules: input.validationRules,
+    priority: "Normal",
+    dependencyCardIds: []
+  },
+  promptPreview: "Seed session prompt preview.",
+  logs: [createLogEntry("Seed session completed", "success")],
+  currentStep: "Waiting for review",
+  changedFiles: ["README.md"],
+  diffText: input.diffText,
+  summary: input.summary,
+  validationResults: [],
+  tokenUsage: {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    costUsd: 0
+  },
+  durationSeconds: 0,
+  startedAt: input.timestamp,
+  completedAt: input.timestamp,
+  createdAt: input.timestamp,
+  updatedAt: input.timestamp
+});

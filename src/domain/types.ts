@@ -1,11 +1,4 @@
-export type BoardColumnId =
-  | "my-skill"
-  | "my-plan"
-  | "skill-used"
-  | "start-implement"
-  | "in-process"
-  | "in-review"
-  | "successfully";
+export type BoardColumnId = "my-plan" | "start-implement" | "in-process" | "in-review" | "done";
 
 export type ExecutionMode =
   | "Plan Only"
@@ -20,6 +13,12 @@ export type ModelProvider = "OpenAI" | "Anthropic" | "Google" | "Local" | "Custo
 export type CliToolProvider = "Claude Code" | "Codex" | "Custom CLI";
 
 export type AgentRunnerType = "api" | "cli";
+
+export type TaskPriority = "Critical" | "High" | "Normal" | "Low";
+
+export type SessionStatus = "running" | "completed" | "approved" | "rejected" | "cancelled" | "failed";
+
+export type SessionRetryMode = "fresh" | "continue";
 
 export interface BoardColumn {
   id: BoardColumnId;
@@ -43,6 +42,66 @@ export interface ReviewChecklist {
   noRiskyFileChanged: boolean;
   summaryIsClear: boolean;
   userApproved: boolean;
+}
+
+export interface ValidationRules {
+  runBuild: boolean;
+  runLint: boolean;
+  runTests: boolean;
+  checkFormatting: boolean;
+}
+
+export interface ValidationResult {
+  id: string;
+  name: string;
+  status: "pending" | "passed" | "failed" | "skipped";
+  output: string;
+  completedAt?: string;
+}
+
+export interface SessionContextSnapshot {
+  title: string;
+  description: string;
+  skillIds: string[];
+  executionMode: ExecutionMode;
+  projectContext: ProjectContext;
+  safetySettings: SafetySettings;
+  validationRules: ValidationRules;
+  priority: TaskPriority;
+  dependencyCardIds: string[];
+}
+
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costUsd: number;
+}
+
+export interface ImplementationSession {
+  id: string;
+  cardId: string;
+  attemptNumber: number;
+  status: SessionStatus;
+  retryMode: SessionRetryMode;
+  selectedAgentProfileId?: string;
+  runnerType: AgentRunnerType;
+  modelProfileId: string;
+  cliToolProfileId?: string;
+  contextSnapshot: SessionContextSnapshot;
+  promptPreview: string;
+  logs: ActivityLogEntry[];
+  currentStep: string;
+  changedFiles: string[];
+  diffText: string;
+  summary: string;
+  validationResults: ValidationResult[];
+  tokenUsage: TokenUsage;
+  durationSeconds: number;
+  startedAt: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ActivityLogEntry {
@@ -142,6 +201,12 @@ export interface KanbanCard {
   agentProfileId?: string;
   cliToolProfileId?: string;
   executionMode: ExecutionMode;
+  priority: TaskPriority;
+  dependencyCardIds: string[];
+  validationRules: ValidationRules;
+  sessions: ImplementationSession[];
+  activeSessionId?: string;
+  rejectCount: number;
   projectContext: ProjectContext;
   safetySettings: SafetySettings;
   reviewChecklist: ReviewChecklist;

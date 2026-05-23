@@ -31,7 +31,7 @@ import {
 import { createId, nowIso } from "../domain/id";
 import { createModelProfile, deleteModelProfile, updateModelProfile } from "../domain/modelService";
 import { createSkill, deleteSkill, duplicateSkill, updateSkill } from "../domain/skillService";
-import type { AppState, BoardColumnId, KanbanCard, Workspace } from "../domain/types";
+import type { AppState, BoardColumnId, KanbanCard, SessionRetryMode, Workspace } from "../domain/types";
 import { loadAppState, resetAppState, saveAppState } from "../storage/localStorageRepository";
 import { loadThemeMode, resolveThemeMode, saveThemeMode, type ThemeMode } from "./theme";
 
@@ -202,7 +202,7 @@ export const App = () => {
     }));
   };
 
-  const handleRunPlanOnly = async (cardId: string) => {
+  const handleRunPlanOnly = async (cardId: string, retryMode: SessionRetryMode = "fresh") => {
     const card = activeWorkspace.cards.find((item) => item.id === cardId);
     if (!card) {
       return;
@@ -212,11 +212,21 @@ export const App = () => {
       return;
     }
 
-    const startedWorkspace = startPlanOnlyExecution(activeWorkspace, cardId);
+    const started = startPlanOnlyExecution(activeWorkspace, cardId, retryMode);
+    setWarning(started.warning ?? null);
+    if (started.warning) {
+      setState((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((workspace) =>
+          workspace.id === current.activeWorkspaceId ? started.workspace : workspace
+        )
+      }));
+      return;
+    }
     setState((current) => ({
       ...current,
       workspaces: current.workspaces.map((workspace) =>
-        workspace.id === current.activeWorkspaceId ? startedWorkspace : workspace
+        workspace.id === current.activeWorkspaceId ? started.workspace : workspace
       )
     }));
 
@@ -243,10 +253,6 @@ export const App = () => {
   const handleLoadAttachedFiles = async (cardId: string) => {
     const card = activeWorkspace.cards.find((item) => item.id === cardId);
     if (!card) {
-      return;
-    }
-    if (card.runnerType !== "cli") {
-      setWarning("This card is set to API Model. Switch runner to CLI Agent before running Claude Code / Codex.");
       return;
     }
 
@@ -290,13 +296,17 @@ export const App = () => {
     );
   };
 
-  const handleRunCliAgent = async (cardId: string) => {
+  const handleRunCliAgent = async (cardId: string, retryMode: SessionRetryMode = "fresh") => {
     const card = activeWorkspace.cards.find((item) => item.id === cardId);
     if (!card) {
       return;
     }
     if (card.locked) {
       setWarning("This card is locked by a running task.");
+      return;
+    }
+    if (card.runnerType !== "cli") {
+      setWarning("This card is set to API Model. Switch runner to CLI Agent before running Claude Code / Codex.");
       return;
     }
 
@@ -308,11 +318,21 @@ export const App = () => {
       return;
     }
 
-    const startedWorkspace = startCliExecution(activeWorkspace, cardId);
+    const started = startCliExecution(activeWorkspace, cardId, retryMode);
+    setWarning(started.warning ?? null);
+    if (started.warning) {
+      setState((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((workspace) =>
+          workspace.id === current.activeWorkspaceId ? started.workspace : workspace
+        )
+      }));
+      return;
+    }
     setState((current) => ({
       ...current,
       workspaces: current.workspaces.map((workspace) =>
-        workspace.id === current.activeWorkspaceId ? startedWorkspace : workspace
+        workspace.id === current.activeWorkspaceId ? started.workspace : workspace
       )
     }));
 
@@ -494,11 +514,10 @@ export const App = () => {
           <select aria-label="Filter by status" value={filterStatus} onChange={(event) => setFilterStatus(event.target.value)}>
             <option value="">All statuses</option>
             <option value="my-plan">My Plan</option>
-            <option value="skill-used">Skill Used</option>
             <option value="start-implement">Start Implement</option>
             <option value="in-process">In Process</option>
             <option value="in-review">In Review</option>
-            <option value="successfully">Successfully</option>
+            <option value="done">Done</option>
           </select>
           <label className="toolbar-toggle">
             <input checked={compactBoard} type="checkbox" onChange={(event) => setCompactBoard(event.target.checked)} />
@@ -534,7 +553,13 @@ export const App = () => {
         onReviewAction={(cardId, action) =>
           updateActiveWorkspace((workspace) => applyReviewAction(workspace, cardId, action))
         }
-        onSimulateExecution={(cardId) => updateActiveWorkspace((workspace) => simulateExecution(workspace, cardId))}
+        onSimulateExecution={(cardId) =>
+          updateActiveWorkspace((workspace) => {
+            const result = simulateExecution(workspace, cardId);
+            setWarning(result.warning ?? null);
+            return result.workspace;
+          })
+        }
         onCancelExecution={(cardId) => updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId))}
         onRunPlanOnly={handleRunPlanOnly}
         onLoadAttachedFiles={handleLoadAttachedFiles}
