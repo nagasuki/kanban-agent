@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Board } from "../components/board/Board";
 import { CardDetailDrawer } from "../components/drawer/CardDetailDrawer";
+import { SettingsModal } from "../components/settings/SettingsModal";
 import { Sidebar } from "../components/sidebar/Sidebar";
+import { TopNav } from "../components/topnav/TopNav";
 import { runPlanOnly } from "../agent/agentRunner";
 import { runCliAgent } from "../agent/cliRunner";
 import { repoBridge } from "../desktop/repoBridge";
@@ -32,6 +34,7 @@ import { createModelProfile, deleteModelProfile, updateModelProfile } from "../d
 import { createSkill, deleteSkill, duplicateSkill, updateSkill } from "../domain/skillService";
 import type { AppState, BoardColumnId, KanbanCard, Workspace } from "../domain/types";
 import { loadAppState, resetAppState, saveAppState } from "../storage/localStorageRepository";
+import { loadThemeMode, resolveThemeMode, saveThemeMode, type ThemeMode } from "./theme";
 
 export const App = () => {
   const [state, setState] = useState<AppState>(() => loadAppState());
@@ -42,10 +45,30 @@ export const App = () => {
   const [filterModelId, setFilterModelId] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [compactBoard, setCompactBoard] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
 
   useEffect(() => {
     saveAppState(state);
   }, [state]);
+
+  useEffect(() => {
+    const applyTheme = () => {
+      document.documentElement.dataset.theme = resolveThemeMode(themeMode);
+      document.documentElement.dataset.themeMode = themeMode;
+    };
+
+    applyTheme();
+    saveThemeMode(themeMode);
+
+    if (themeMode !== "system") {
+      return undefined;
+    }
+
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    media.addEventListener("change", applyTheme);
+    return () => media.removeEventListener("change", applyTheme);
+  }, [themeMode]);
 
   const activeWorkspace = useMemo(
     () => state.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId) ?? state.workspaces[0],
@@ -369,7 +392,7 @@ export const App = () => {
       repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
     });
     setWarning(result.ok ? null : result.output);
-    updateActiveWorkspace((workspace) => recordCommandResult(workspace, cardId, "rollback", result));
+    updateActiveWorkspace((workspace) => recordCommandResult(workspace, cardId, "commit", result));
   };
 
   const handleRollbackFiles = async (cardId: string) => {
@@ -384,7 +407,7 @@ export const App = () => {
       repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
     });
     setWarning(result.ok ? null : result.output);
-    updateActiveWorkspace((workspace) => recordCommandResult(workspace, cardId, "commit", result));
+    updateActiveWorkspace((workspace) => recordCommandResult(workspace, cardId, "rollback", result));
   };
 
   const handleCreatePr = async (cardId: string) => {
@@ -413,57 +436,70 @@ export const App = () => {
 
   return (
     <div className="app-shell">
-      <Sidebar
-        state={state}
+      <TopNav
         activeWorkspace={activeWorkspace}
+        searchQuery={searchQuery}
+        workspaces={state.workspaces}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onSearch={setSearchQuery}
         onSelectWorkspace={(workspaceId) => {
           setState((current) => ({ ...current, activeWorkspaceId: workspaceId }));
           setSelectedCardId(null);
         }}
-        onCreateWorkspace={handleCreateWorkspace}
-        onDeleteWorkspace={handleDeleteWorkspace}
-        onInspectRepo={handleInspectRepo}
-        onSelectRepoFolder={handleSelectRepoFolder}
-        onUpdateWorkspace={(updates) => {
-          updateActiveWorkspace((workspace) => ({ ...workspace, ...updates, updatedAt: nowIso() }));
-        }}
-        onReset={() => {
-          setState(resetAppState());
-          setSelectedCardId(null);
-        }}
-        onCreateSkill={() => updateActiveWorkspace(createSkill)}
-        onUpdateSkill={(skillId, updates) => updateActiveWorkspace((workspace) => updateSkill(workspace, skillId, updates))}
-        onDuplicateSkill={(skillId) => updateActiveWorkspace((workspace) => duplicateSkill(workspace, skillId))}
-        onDeleteSkill={(skillId) => updateActiveWorkspace((workspace) => deleteSkill(workspace, skillId))}
-        onCreateModel={() => updateActiveWorkspace(createModelProfile)}
-        onUpdateModel={(modelId, updates) =>
-          updateActiveWorkspace((workspace) => updateModelProfile(workspace, modelId, updates))
-        }
-        onDeleteModel={(modelId) => updateActiveWorkspace((workspace) => deleteModelProfile(workspace, modelId))}
-        onCreateCliTool={() => updateActiveWorkspace(createCliToolProfile)}
-        onUpdateCliTool={(profileId, updates) =>
-          updateActiveWorkspace((workspace) => updateCliToolProfile(workspace, profileId, updates))
-        }
-        onDeleteCliTool={(profileId) => updateActiveWorkspace((workspace) => deleteCliToolProfile(workspace, profileId))}
-        onCreateAgent={() => updateActiveWorkspace(createAgentProfile)}
-        onUpdateAgent={(agentId, updates) =>
-          updateActiveWorkspace((workspace) => updateAgentProfile(workspace, agentId, updates))
-        }
-        onDeleteAgent={(agentId) => updateActiveWorkspace((workspace) => deleteAgentProfile(workspace, agentId))}
       />
 
-      <main className="main-panel">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Agent workflow control panel</p>
-            <h1>{activeWorkspace.name}</h1>
-          </div>
-          <div className="topbar-meta">
-            <span>{activeWorkspace.cards.length} cards</span>
-            <span>{activeWorkspace.skills.length} skills</span>
-            <span>{activeWorkspace.modelProfiles.length} models</span>
-          </div>
-        </header>
+      <div className="app-body">
+        <Sidebar
+          state={state}
+          activeWorkspace={activeWorkspace}
+          onSelectWorkspace={(workspaceId) => {
+            setState((current) => ({ ...current, activeWorkspaceId: workspaceId }));
+            setSelectedCardId(null);
+          }}
+          onCreateWorkspace={handleCreateWorkspace}
+          onDeleteWorkspace={handleDeleteWorkspace}
+          onInspectRepo={handleInspectRepo}
+          onSelectRepoFolder={handleSelectRepoFolder}
+          onUpdateWorkspace={(updates) => {
+            updateActiveWorkspace((workspace) => ({ ...workspace, ...updates, updatedAt: nowIso() }));
+          }}
+          onReset={() => {
+            setState(resetAppState());
+            setSelectedCardId(null);
+          }}
+          onCreateSkill={() => updateActiveWorkspace(createSkill)}
+          onUpdateSkill={(skillId, updates) => updateActiveWorkspace((workspace) => updateSkill(workspace, skillId, updates))}
+          onDuplicateSkill={(skillId) => updateActiveWorkspace((workspace) => duplicateSkill(workspace, skillId))}
+          onDeleteSkill={(skillId) => updateActiveWorkspace((workspace) => deleteSkill(workspace, skillId))}
+          onCreateModel={() => updateActiveWorkspace(createModelProfile)}
+          onUpdateModel={(modelId, updates) =>
+            updateActiveWorkspace((workspace) => updateModelProfile(workspace, modelId, updates))
+          }
+          onDeleteModel={(modelId) => updateActiveWorkspace((workspace) => deleteModelProfile(workspace, modelId))}
+          onCreateCliTool={() => updateActiveWorkspace(createCliToolProfile)}
+          onUpdateCliTool={(profileId, updates) =>
+            updateActiveWorkspace((workspace) => updateCliToolProfile(workspace, profileId, updates))
+          }
+          onDeleteCliTool={(profileId) => updateActiveWorkspace((workspace) => deleteCliToolProfile(workspace, profileId))}
+          onCreateAgent={() => updateActiveWorkspace(createAgentProfile)}
+          onUpdateAgent={(agentId, updates) =>
+            updateActiveWorkspace((workspace) => updateAgentProfile(workspace, agentId, updates))
+          }
+          onDeleteAgent={(agentId) => updateActiveWorkspace((workspace) => deleteAgentProfile(workspace, agentId))}
+        />
+
+        <main className="main-panel">
+          <header className="topbar">
+            <div>
+              <p className="eyebrow">Agent workflow control panel</p>
+              <h1>{activeWorkspace.name}</h1>
+            </div>
+            <div className="topbar-meta">
+              <span>{activeWorkspace.cards.length} cards</span>
+              <span>{activeWorkspace.skills.length} skills</span>
+              <span>{activeWorkspace.modelProfiles.length} models</span>
+            </div>
+          </header>
 
         {warning ? (
           <button className="warning-banner" type="button" onClick={() => setWarning(null)}>
@@ -521,32 +557,37 @@ export const App = () => {
           onCreateCard={handleCreateCard}
           onMoveCard={handleMoveCard}
         />
-      </main>
+        </main>
 
-      <CardDetailDrawer
-        card={selectedCard}
-        workspace={activeWorkspace}
-        onClose={() => setSelectedCardId(null)}
-        onUpdateCard={(cardId: string, updates: Partial<KanbanCard>) =>
-          updateActiveWorkspace((workspace) => updateCard(workspace, cardId, updates))
-        }
-        onDeleteCard={handleDeleteCard}
-        onDuplicateCard={handleDuplicateCard}
-        onReviewAction={(cardId, action) =>
-          updateActiveWorkspace((workspace) => applyReviewAction(workspace, cardId, action))
-        }
-        onSimulateExecution={(cardId) => updateActiveWorkspace((workspace) => simulateExecution(workspace, cardId))}
-        onCancelExecution={(cardId) => updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId))}
-        onRunPlanOnly={handleRunPlanOnly}
-        onLoadAttachedFiles={handleLoadAttachedFiles}
-        onRunCliAgent={handleRunCliAgent}
-        onApplyPatch={handleApplyPatch}
-        onRunWorkspaceCommand={handleRunWorkspaceCommand}
-        onCommit={handleCommit}
-        onGeneratePrDraft={handleGeneratePrDraft}
-        onRollbackFiles={handleRollbackFiles}
-        onCreatePr={handleCreatePr}
-      />
+        <CardDetailDrawer
+          card={selectedCard}
+          workspace={activeWorkspace}
+          onClose={() => setSelectedCardId(null)}
+          onUpdateCard={(cardId: string, updates: Partial<KanbanCard>) =>
+            updateActiveWorkspace((workspace) => updateCard(workspace, cardId, updates))
+          }
+          onDeleteCard={handleDeleteCard}
+          onDuplicateCard={handleDuplicateCard}
+          onReviewAction={(cardId, action) =>
+            updateActiveWorkspace((workspace) => applyReviewAction(workspace, cardId, action))
+          }
+          onSimulateExecution={(cardId) => updateActiveWorkspace((workspace) => simulateExecution(workspace, cardId))}
+          onCancelExecution={(cardId) => updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId))}
+          onRunPlanOnly={handleRunPlanOnly}
+          onLoadAttachedFiles={handleLoadAttachedFiles}
+          onRunCliAgent={handleRunCliAgent}
+          onApplyPatch={handleApplyPatch}
+          onRunWorkspaceCommand={handleRunWorkspaceCommand}
+          onCommit={handleCommit}
+          onGeneratePrDraft={handleGeneratePrDraft}
+          onRollbackFiles={handleRollbackFiles}
+          onCreatePr={handleCreatePr}
+        />
+      </div>
+
+      {settingsOpen ? (
+        <SettingsModal themeMode={themeMode} onClose={() => setSettingsOpen(false)} onThemeChange={setThemeMode} />
+      ) : null}
     </div>
   );
 };
