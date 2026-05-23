@@ -52,6 +52,10 @@ export const deleteModelProfile = (workspace: Workspace, modelId: string): Works
     ...workspace,
     defaultModelProfileId: workspace.defaultModelProfileId === modelId ? fallbackModelId : workspace.defaultModelProfileId,
     modelProfiles: remainingModels,
+    agentProfiles: workspace.agentProfiles.map((agent) => ({
+      ...agent,
+      defaultModelProfileId: agent.defaultModelProfileId === modelId ? fallbackModelId : agent.defaultModelProfileId
+    })),
     cards: workspace.cards.map((card) => ({
       ...card,
       modelProfileId: card.modelProfileId === modelId ? fallbackModelId : card.modelProfileId

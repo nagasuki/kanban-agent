@@ -49,7 +49,7 @@ export const createDefaultCliToolProfiles = (): CliToolProfile[] => {
       name: "Claude Code",
       provider: "Claude Code",
       command: "claude",
-      args: "",
+      args: "-p",
       timeoutSeconds: 600,
       createdAt: timestamp,
       updatedAt: timestamp
@@ -59,7 +59,7 @@ export const createDefaultCliToolProfiles = (): CliToolProfile[] => {
       name: "Codex CLI",
       provider: "Codex",
       command: "codex",
-      args: "",
+      args: "exec -",
       timeoutSeconds: 600,
       createdAt: timestamp,
       updatedAt: timestamp

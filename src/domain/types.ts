@@ -19,6 +19,8 @@ export type ModelProvider = "OpenAI" | "Anthropic" | "Google" | "Local" | "Custo
 
 export type CliToolProvider = "Claude Code" | "Codex" | "Custom CLI";
 
+export type AgentRunnerType = "api" | "cli";
+
 export interface BoardColumn {
   id: BoardColumnId;
   title: string;
@@ -95,7 +97,9 @@ export interface AgentProfile {
   id: string;
   name: string;
   skillIds: string[];
+  defaultRunnerType: AgentRunnerType;
   defaultModelProfileId: string;
+  defaultCliToolProfileId: string;
   defaultExecutionMode: ExecutionMode;
   notes: string;
   createdAt: string;
@@ -133,6 +137,7 @@ export interface KanbanCard {
   title: string;
   description: string;
   skillIds: string[];
+  runnerType: AgentRunnerType;
   modelProfileId: string;
   agentProfileId?: string;
   cliToolProfileId?: string;

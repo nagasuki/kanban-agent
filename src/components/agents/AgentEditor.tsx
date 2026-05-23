@@ -38,7 +38,19 @@ export const AgentEditor = ({ agent, workspace, onUpdate, onDelete }: AgentEdito
       </div>
 
       <label>
-        Default model
+        Default runner
+        <select
+          value={agent.defaultRunnerType}
+          onChange={(event) => onUpdate({ defaultRunnerType: event.target.value as AgentProfile["defaultRunnerType"] })}
+        >
+          <option value="cli">CLI Agent</option>
+          <option value="api">API Model</option>
+        </select>
+      </label>
+
+      {agent.defaultRunnerType === "api" ? (
+      <label>
+        Default API model
         <select
           value={agent.defaultModelProfileId}
           onChange={(event) => onUpdate({ defaultModelProfileId: event.target.value })}
@@ -51,6 +63,24 @@ export const AgentEditor = ({ agent, workspace, onUpdate, onDelete }: AgentEdito
           ))}
         </select>
       </label>
+      ) : null}
+
+      {agent.defaultRunnerType === "cli" ? (
+      <label>
+        Default CLI
+        <select
+          value={agent.defaultCliToolProfileId}
+          onChange={(event) => onUpdate({ defaultCliToolProfileId: event.target.value })}
+        >
+          <option value="">No CLI</option>
+          {workspace.cliToolProfiles.map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      ) : null}
 
       <label>
         Default execution mode

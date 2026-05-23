@@ -1,15 +1,19 @@
 import { createLogEntry } from "./defaults";
-import type { KanbanCard, ModelProfile, SkillPreset } from "./types";
+import type { CliToolProfile, KanbanCard, ModelProfile, SkillPreset } from "./types";
 
 export const buildExecutionPreview = (
   card: KanbanCard,
   model: ModelProfile | undefined,
-  skills: SkillPreset[]
+  skills: SkillPreset[],
+  cliTool?: CliToolProfile | undefined
 ): string => {
   const skillNames = skills.length > 0 ? skills.map((skill) => skill.name).join(", ") : "No skill selected";
   return [
-    `Model: ${model?.modelName ?? "No model selected"}`,
-    `Provider: ${model?.provider ?? "Unknown"}`,
+    `Runner: ${card.runnerType === "cli" ? "CLI" : "API Model"}`,
+    `API model: ${model?.modelName ?? "No API model selected"}`,
+    `API provider: ${model?.provider ?? "Unknown"}`,
+    `CLI tool: ${cliTool?.name ?? "No CLI selected"}`,
+    `CLI command: ${cliTool?.command ?? "Not set"}`,
     `Skill: ${skillNames}`,
     `Execution mode: ${card.executionMode}`,
     `Repo: ${card.projectContext.repoPath || "Not set"}`,

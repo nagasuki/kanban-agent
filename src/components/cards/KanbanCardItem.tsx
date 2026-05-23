@@ -1,4 +1,5 @@
 import { CheckCircle2, Clock3, FileText, ShieldCheck } from "lucide-react";
+import { BOARD_COLUMNS } from "../../domain/constants";
 import type { KanbanCard, Workspace } from "../../domain/types";
 
 interface KanbanCardItemProps {
@@ -11,10 +12,14 @@ interface KanbanCardItemProps {
 export const KanbanCardItem = ({ card, workspace, isSelected, onSelect }: KanbanCardItemProps) => {
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
   const model = workspace.modelProfiles.find((profile) => profile.id === card.modelProfileId);
+  const cliTool = workspace.cliToolProfiles.find((profile) => profile.id === (card.cliToolProfileId || workspace.defaultCliToolProfileId));
   const checklistDone = Object.values(card.reviewChecklist).filter(Boolean).length;
+  const columnTitle = BOARD_COLUMNS.find((column) => column.id === card.columnId)?.title ?? "Workflow";
+  const runnerLabel = card.runnerType === "cli" ? cliTool?.name ?? "No CLI" : model?.modelName ?? "No API model";
 
   return (
     <article
+      aria-label={`Open card detail for ${card.title}`}
       className={`kanban-card ${isSelected ? "selected" : ""}`}
       draggable
       role="button"
@@ -31,6 +36,11 @@ export const KanbanCardItem = ({ card, workspace, isSelected, onSelect }: Kanban
         }
       }}
     >
+      <div className="card-status-row">
+        <span className={`status-dot ${card.columnId}`} />
+        <span>{columnTitle}</span>
+        {card.locked ? <span className="mini-badge warning-text">Running</span> : null}
+      </div>
       <div className="card-title-row">
         <h3>{card.title}</h3>
         {card.reviewChecklist.userApproved ? <CheckCircle2 className="success-icon" size={16} /> : null}
@@ -50,8 +60,10 @@ export const KanbanCardItem = ({ card, workspace, isSelected, onSelect }: Kanban
 
       <div className="card-footer">
         <span>{skills[0]?.name ?? "No skill"}</span>
-        <span>{model?.modelName ?? "No model"}</span>
+        <span>{runnerLabel}</span>
       </div>
+
+      <div className="open-detail-hint">Click to open details</div>
 
       {card.columnId === "in-review" || card.columnId === "successfully" ? (
         <div className="review-meter">

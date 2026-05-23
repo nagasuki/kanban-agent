@@ -418,13 +418,137 @@ const createPatchBackup = (repoPath, files) => {
   return backupRoot;
 };
 
+const uniqueExistingDirs = (dirs) => {
+  const seen = new Set();
+  return dirs
+    .filter(Boolean)
+    .map((dir) => path.normalize(dir))
+    .filter((dir) => {
+      const key = dir.toLowerCase();
+      if (seen.has(key) || !fs.existsSync(dir)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+};
+
+const extraExecutableDirs = () =>
+  uniqueExistingDirs([
+    process.env.APPDATA ? path.join(process.env.APPDATA, "npm") : "",
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Microsoft", "WindowsApps") : "",
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Programs", "nodejs") : "",
+    process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "AppData", "Roaming", "npm") : "",
+    process.env.USERPROFILE ? path.join(process.env.USERPROFILE, ".cargo", "bin") : "",
+    process.env.USERPROFILE ? path.join(process.env.USERPROFILE, ".local", "bin") : "",
+    "C:\\Program Files\\nodejs"
+  ]);
+
+const commandEnvironment = () => {
+  const currentPath = process.env.PATH || process.env.Path || "";
+  const pathParts = [...extraExecutableDirs(), ...currentPath.split(path.delimiter).filter(Boolean)];
+  const nextPath = uniqueExistingDirs(pathParts).join(path.delimiter);
+  return {
+    ...process.env,
+    PATH: nextPath,
+    Path: nextPath
+  };
+};
+
+const stripWrappingQuotes = (value) => {
+  const trimmed = String(value || "").trim();
+  if (
+    (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+};
+
+const commandHasPath = (command) => command.includes("\\") || command.includes("/") || path.isAbsolute(command);
+
+const executableCandidates = (command) => {
+  const clean = stripWrappingQuotes(command);
+  if (process.platform !== "win32" || path.extname(clean)) {
+    return [clean];
+  }
+
+  return [clean, `${clean}.cmd`, `${clean}.exe`, `${clean}.bat`];
+};
+
+const resolveExecutable = (command, env) => {
+  const clean = stripWrappingQuotes(command);
+  const pathValue = env.PATH || env.Path || "";
+  const pathDirs = pathValue.split(path.delimiter).filter(Boolean);
+
+  if (commandHasPath(clean)) {
+    const resolvedCandidates = executableCandidates(clean);
+    const found = resolvedCandidates.find((candidate) => fs.existsSync(candidate));
+    return {
+      command: found || clean,
+      found: Boolean(found),
+      searched: resolvedCandidates
+    };
+  }
+
+  const searched = [];
+  for (const dir of pathDirs) {
+    for (const candidate of executableCandidates(clean)) {
+      const absoluteCandidate = path.join(dir, candidate);
+      searched.push(absoluteCandidate);
+      if (fs.existsSync(absoluteCandidate)) {
+        return {
+          command: absoluteCandidate,
+          found: true,
+          searched
+        };
+      }
+    }
+  }
+
+  return {
+    command: clean,
+    found: false,
+    searched
+  };
+};
+
+const shouldUseShell = (command) => process.platform === "win32" && [".cmd", ".bat"].includes(path.extname(command).toLowerCase());
+
+const commandNotFoundMessage = (command, searched) => {
+  const searchedPreview = searched.slice(0, 8).join("\n");
+  const more = searched.length > 8 ? `\n...and ${searched.length - 8} more PATH entries.` : "";
+  return [
+    `Could not find CLI command "${command}".`,
+    "Install the CLI or set Settings > CLI Agents > Command to the full executable path.",
+    "On Windows npm global CLIs are often under %APPDATA%\\npm, for example C:\\Users\\<you>\\AppData\\Roaming\\npm\\claude.cmd.",
+    searchedPreview ? `Searched:\n${searchedPreview}${more}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
 const runCommand = (command, args, cwd, stdin, timeoutMs) =>
   new Promise((resolve) => {
-    const child = spawn(command, args, {
+    const env = commandEnvironment();
+    const executable = resolveExecutable(command, env);
+    if (!executable.found && process.platform === "win32") {
+      resolve({
+        ok: false,
+        stdout: "",
+        stderr: commandNotFoundMessage(command, executable.searched),
+        timedOut: false,
+        exitCode: null
+      });
+      return;
+    }
+
+    const child = spawn(executable.command, args, {
       cwd,
-      shell: false,
+      shell: shouldUseShell(executable.command),
       windowsHide: true,
-      env: process.env
+      env
     });
 
     let stdout = "";
@@ -444,7 +568,9 @@ const runCommand = (command, args, cwd, stdin, timeoutMs) =>
     });
     child.on("error", (error) => {
       clearTimeout(timer);
-      resolve({ ok: false, stdout, stderr: error.message, timedOut, exitCode: null });
+      const stderrText =
+        error.code === "ENOENT" ? commandNotFoundMessage(command, executable.searched) : error.message;
+      resolve({ ok: false, stdout, stderr: stderrText, timedOut, exitCode: null });
     });
     child.on("close", (exitCode) => {
       clearTimeout(timer);
@@ -508,11 +634,24 @@ const registerCliHandlers = () => {
     }
 
     return new Promise((resolve) => {
-      const child = spawn(command, splitArgs(options.args), {
+      const env = commandEnvironment();
+      const executable = resolveExecutable(command, env);
+      if (!executable.found && process.platform === "win32") {
+        resolve({
+          ok: false,
+          exitCode: null,
+          stdout: "",
+          stderr: commandNotFoundMessage(command, executable.searched),
+          timedOut: false
+        });
+        return;
+      }
+
+      const child = spawn(executable.command, splitArgs(options.args), {
         cwd,
-        shell: false,
+        shell: shouldUseShell(executable.command),
         windowsHide: true,
-        env: process.env
+        env
       });
 
       let stdout = "";
@@ -537,7 +676,9 @@ const registerCliHandlers = () => {
 
       child.on("error", (error) => {
         clearTimeout(timer);
-        resolve({ ok: false, exitCode: null, stdout, stderr: error.message, timedOut });
+        const stderrText =
+          error.code === "ENOENT" ? commandNotFoundMessage(command, executable.searched) : error.message;
+        resolve({ ok: false, exitCode: null, stdout, stderr: stderrText, timedOut });
       });
 
       child.on("close", (exitCode) => {

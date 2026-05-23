@@ -109,6 +109,7 @@ export const createSeedState = (): AppState => {
       description: "When a plan enters Start Implement, show selected model, selected skill, repo context, and execution mode.",
       skillIds: [skills[1].id],
       modelProfileId: models[0].id,
+      runnerType: "cli",
       repoPath: "D:\\kanban-agent",
       targetPaths: "src/domain, src/components/drawer"
     }),
@@ -119,6 +120,7 @@ export const createSeedState = (): AppState => {
       description: "Attach Code Reviewer and configure checklist state before moving cards into In Review.",
       skillIds: [skills[0].id],
       modelProfileId: models[0].id,
+      runnerType: "api",
       repoPath: "D:\\kanban-agent",
       targetPaths: "src/components/cards, src/domain/boardService.ts"
     }),
@@ -129,6 +131,7 @@ export const createSeedState = (): AppState => {
       description: "Summarize sandbox settings and explain how approvals will work before real API execution exists.",
       skillIds: [skills[2].id],
       modelProfileId: models[1].id,
+      runnerType: "api",
       repoPath: "D:\\kanban-agent",
       targetPaths: "README.md"
     })
@@ -155,7 +158,9 @@ export const createSeedState = (): AppState => {
         id: agentProfileId,
         name: "Implementation Agent",
         skillIds: [skills[1].id],
+        defaultRunnerType: "cli",
         defaultModelProfileId: models[0].id,
+        defaultCliToolProfileId: cliProfiles[0].id,
         defaultExecutionMode: "Suggest Patch",
         notes: "Default profile for focused implementation tasks.",
         createdAt: timestamp,
@@ -179,6 +184,7 @@ const createSeedCard = (input: {
   description: string;
   skillIds: string[];
   modelProfileId: string;
+  runnerType: KanbanCard["runnerType"];
   repoPath: string;
   targetPaths: string;
 }): KanbanCard => {
@@ -190,6 +196,7 @@ const createSeedCard = (input: {
     title: input.title,
     description: input.description,
     skillIds: input.skillIds,
+    runnerType: input.runnerType,
     modelProfileId: input.modelProfileId,
     agentProfileId: undefined,
     cliToolProfileId: undefined,

@@ -52,6 +52,10 @@ export const deleteCliToolProfile = (workspace: Workspace, profileId: string): W
     defaultCliToolProfileId:
       workspace.defaultCliToolProfileId === profileId ? fallbackProfileId : workspace.defaultCliToolProfileId,
     cliToolProfiles: profiles,
+    agentProfiles: workspace.agentProfiles.map((agent) => ({
+      ...agent,
+      defaultCliToolProfileId: agent.defaultCliToolProfileId === profileId ? fallbackProfileId : agent.defaultCliToolProfileId
+    })),
     cards: workspace.cards.map((card) => ({
       ...card,
       cliToolProfileId: card.cliToolProfileId === profileId ? undefined : card.cliToolProfileId

@@ -1,4 +1,4 @@
-import type { AgentProfile, KanbanCard, ModelProfile, SkillPreset, Workspace } from "./types";
+import type { AgentProfile, CliToolProfile, KanbanCard, ModelProfile, SkillPreset, Workspace } from "./types";
 
 export interface GeneratedPrompt {
   systemPrompt: string;
@@ -11,7 +11,8 @@ export const buildAgentPrompt = (
   workspace: Workspace,
   model: ModelProfile | undefined,
   skills: SkillPreset[],
-  agent: AgentProfile | undefined
+  agent: AgentProfile | undefined,
+  cliTool?: CliToolProfile | undefined
 ): GeneratedPrompt => {
   const skillMarkdown = skills.length > 0 ? skills.map(formatSkillMarkdown).join("\n\n") : "No skill preset selected.";
   const safetyInstructions = buildSafetyInstructions(card, workspace);
@@ -35,7 +36,9 @@ export const buildAgentPrompt = (
     `Workspace: ${workspace.name}`,
     `Repo path: ${card.projectContext.repoPath || workspace.repoPath || "Not set"}`,
     `Default branch: ${workspace.defaultBranch || "Not set"}`,
-    `Model: ${model ? `${model.provider} / ${model.modelName}` : "Not set"}`,
+    `Runner: ${card.runnerType === "cli" ? "CLI" : "API Model"}`,
+    `API model: ${model ? `${model.provider} / ${model.modelName}` : "Not set"}`,
+    `CLI tool: ${cliTool ? `${cliTool.provider} / ${cliTool.name}` : "Not set"}`,
     `Execution mode: ${card.executionMode}`,
     `Target paths: ${card.projectContext.targetPaths || "Not set"}`,
     `Target files: ${card.projectContext.targetFiles || "Not set"}`,

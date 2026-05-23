@@ -31,7 +31,11 @@ export const CliToolEditor = ({ profile, onDelete, onUpdate }: CliToolEditorProp
 
       <label>
         Command
-        <input value={profile.command} onChange={(event) => onUpdate({ command: event.target.value })} />
+        <input
+          value={profile.command}
+          onChange={(event) => onUpdate({ command: event.target.value })}
+          placeholder="claude, codex, or full path to .cmd/.exe"
+        />
       </label>
 
       <label>
@@ -39,7 +43,7 @@ export const CliToolEditor = ({ profile, onDelete, onUpdate }: CliToolEditorProp
         <input
           value={profile.args}
           onChange={(event) => onUpdate({ args: event.target.value })}
-          placeholder="optional flags; prompt is sent through stdin"
+          placeholder="Claude: -p / Codex: exec -"
         />
       </label>
 
@@ -54,7 +58,10 @@ export const CliToolEditor = ({ profile, onDelete, onUpdate }: CliToolEditorProp
         />
       </label>
 
-      <p className="helper-text">The generated prompt is piped to stdin. Keep command/args configurable for your CLI version.</p>
+      <p className="helper-text">
+        The generated prompt is piped to stdin. On Windows, use a full path like
+        C:\Users\you\AppData\Roaming\npm\claude.cmd if the app cannot find the command.
+      </p>
     </section>
   );
 };

@@ -104,7 +104,7 @@ label {
 
 .app-navbar {
   display: grid;
-  grid-template-columns: auto minmax(320px, 680px) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 18px;
   border-bottom: 1px solid var(--border);
@@ -187,9 +187,10 @@ label {
 
 .settings-modal {
   display: grid;
-  grid-template-columns: 260px minmax(520px, 720px);
-  width: min(980px, calc(100vw - 56px));
-  max-height: min(760px, calc(100vh - 56px));
+  grid-template-columns: 248px minmax(620px, 920px);
+  width: min(1180px, calc(100vw - 56px));
+  height: min(820px, calc(100vh - 56px));
+  max-height: calc(100vh - 56px);
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -202,6 +203,8 @@ label {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid var(--border);
   background: var(--panel-2);
   padding: 16px;
@@ -253,8 +256,16 @@ label {
   display: grid;
   align-content: start;
   gap: 14px;
+  min-height: 0;
   overflow: auto;
-  padding: 22px;
+  overscroll-behavior: contain;
+  padding: 22px 22px 32px;
+  scrollbar-gutter: stable;
+}
+
+.settings-panel-header {
+  display: grid;
+  gap: 6px;
 }
 
 .settings-copy {
@@ -349,6 +360,41 @@ label {
   padding-top: 16px;
 }
 
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settings-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-editor-stack {
+  gap: 12px;
+}
+
+.settings-editor-stack .mini-editor {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel-2);
+  padding: 14px;
+}
+
+.settings-inline-action {
+  justify-self: start;
+}
+
+.settings-placeholder {
+  display: grid;
+  min-height: 140px;
+  place-items: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--muted);
+}
+
 @keyframes modalFade {
   from {
     opacity: 0;
@@ -362,6 +408,45 @@ label {
   }
 }
 
+.detail-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--overlay);
+  padding: 28px;
+  animation: modalFade 120ms ease-out;
+  z-index: 18;
+}
+
+.detail-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1120px, calc(100vw - 56px));
+  max-height: min(860px, calc(100vh - 56px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  animation: modalScale 140ms ease-out;
+}
+
+.detail-modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 96%, transparent);
+  padding: 18px 20px;
+}
+
+.detail-modal-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px 20px;
+}
+
 .app-shell {
   display: grid;
   grid-template-rows: 58px minmax(0, 1fr);
@@ -370,7 +455,7 @@ label {
 
 .app-body {
   display: grid;
-  grid-template-columns: 316px minmax(0, 1fr) 408px;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -579,12 +664,16 @@ label {
   grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
-  padding: 18px 18px 16px;
+  padding: 16px 18px 16px;
   background: #0b0f14;
 }
 
 .topbar {
-  min-height: 54px;
+  min-height: 50px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  padding: 12px 14px;
 }
 
 .topbar h1,
@@ -631,9 +720,13 @@ label {
 
 .board-toolbar {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto;
+  grid-template-columns: minmax(220px, 1.5fr) minmax(140px, 0.75fr) minmax(140px, 0.75fr) minmax(140px, 0.75fr) auto;
   gap: 8px;
   align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 68%, transparent);
+  padding: 10px;
 }
 
 .toolbar-toggle {
@@ -652,7 +745,7 @@ label {
 
 .board {
   display: grid;
-  grid-auto-columns: minmax(286px, 306px);
+  grid-auto-columns: minmax(300px, 330px);
   grid-auto-flow: column;
   gap: 12px;
   min-height: 0;
@@ -667,7 +760,7 @@ label {
   gap: 10px;
   min-height: 0;
   border: 1px solid #1e2938;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #0f151e;
   padding: 12px;
 }
@@ -692,19 +785,25 @@ label {
   align-content: start;
   min-height: 0;
   overflow: auto;
-  padding-right: 2px;
+  padding: 2px 3px 2px 0;
 }
 
 .kanban-card {
   display: grid;
-  gap: 10px;
+  gap: 9px;
   padding: 12px;
   cursor: grab;
   user-select: none;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .kanban-card:active {
   cursor: grabbing;
+  transform: scale(0.99);
 }
 
 .kanban-card:focus-visible {
@@ -720,6 +819,11 @@ label {
 .review-actions button:hover {
   border-color: #3a4960;
   background: #162030;
+}
+
+.kanban-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.16);
 }
 
 .kanban-card h3 {
@@ -749,6 +853,8 @@ label {
 
 .compact-board .kanban-card p,
 .compact-board .card-chip-row,
+.compact-board .card-status-row,
+.compact-board .open-detail-hint,
 .compact-board .review-meter {
   display: none;
 }
@@ -762,6 +868,53 @@ label {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.card-status-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--muted) 16%, transparent);
+}
+
+.status-dot.my-skill,
+.status-dot.successfully {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 16%, transparent);
+}
+
+.status-dot.start-implement,
+.status-dot.in-process {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.status-dot.in-review {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 16%, transparent);
+}
+
+.mini-badge {
+  margin-left: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--panel-4);
+  padding: 2px 7px;
+  font-size: 10px;
+  text-transform: none;
 }
 
 .chip {
@@ -789,6 +942,28 @@ label {
   gap: 6px;
   color: #95d8ff;
   font-size: 12px;
+}
+
+.open-detail-hint,
+.column-empty {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.open-detail-hint {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.column-empty {
+  display: grid;
+  min-height: 88px;
+  place-items: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-3) 58%, transparent);
+  padding: 14px;
+  text-align: center;
 }
 
 .repo-panel {
@@ -847,6 +1022,10 @@ label {
 .drawer-header {
   gap: 12px;
   margin-bottom: 14px;
+}
+
+.detail-modal-header {
+  margin-bottom: 0;
 }
 
 .drawer-actions,

@@ -82,6 +82,7 @@ export const Board = ({
                   onSelect={() => onSelectCard(card.id)}
                 />
               ))}
+              {cards.length === 0 ? <div className="column-empty">Drop cards here or create a new one.</div> : null}
             </div>
           </article>
         );

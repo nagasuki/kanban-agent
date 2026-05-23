@@ -1,4 +1,5 @@
-import { Copy, PanelRightClose, Play, RotateCcw, ShieldCheck, Trash2, Undo2 } from "lucide-react";
+import { useEffect } from "react";
+import { Copy, Play, RotateCcw, ShieldCheck, Trash2, Undo2, X } from "lucide-react";
 import { BOARD_COLUMNS, EXECUTION_MODES } from "../../domain/constants";
 import { buildExecutionPreview } from "../../domain/executionService";
 import { buildAgentPrompt } from "../../domain/promptBuilder";
@@ -6,7 +7,7 @@ import type { BoardColumnId, KanbanCard, Workspace } from "../../domain/types";
 import { DiffViewer } from "../diff/DiffViewer";
 import { FileTreePicker } from "./FileTreePicker";
 
-interface CardDetailDrawerProps {
+interface CardDetailModalProps {
   card: KanbanCard | undefined;
   workspace: Workspace;
   onClose: () => void;
@@ -45,7 +46,7 @@ const checklistLabels: Record<keyof KanbanCard["reviewChecklist"], string> = {
   userApproved: "User approved"
 };
 
-export const CardDetailDrawer = ({
+export const CardDetailModal = ({
   card,
   workspace,
   onClose,
@@ -64,16 +65,34 @@ export const CardDetailDrawer = ({
   onGeneratePrDraft,
   onRollbackFiles,
   onCreatePr
-}: CardDetailDrawerProps) => {
+}: CardDetailModalProps) => {
+  useEffect(() => {
+    if (!card) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [card, onClose]);
+
   if (!card) {
-    return <aside className="drawer drawer-empty">Select a card to inspect the agent context.</aside>;
+    return null;
   }
 
   const selectedSkills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
   const selectedModel = workspace.modelProfiles.find((model) => model.id === card.modelProfileId);
+  const selectedCliTool = workspace.cliToolProfiles.find(
+    (profile) => profile.id === (card.cliToolProfileId || workspace.defaultCliToolProfileId)
+  );
   const selectedAgent = workspace.agentProfiles.find((agent) => agent.id === card.agentProfileId);
-  const executionPreview = buildExecutionPreview(card, selectedModel, selectedSkills);
-  const generatedPrompt = buildAgentPrompt(card, workspace, selectedModel, selectedSkills, selectedAgent);
+  const executionPreview = buildExecutionPreview(card, selectedModel, selectedSkills, selectedCliTool);
+  const generatedPrompt = buildAgentPrompt(card, workspace, selectedModel, selectedSkills, selectedAgent, selectedCliTool);
   const applyAgentProfile = (agentId: string) => {
     const agent = workspace.agentProfiles.find((profile) => profile.id === agentId);
     onUpdateCard(
@@ -82,7 +101,9 @@ export const CardDetailDrawer = ({
         ? {
             agentProfileId: agent.id,
             skillIds: agent.skillIds,
+            runnerType: agent.defaultRunnerType,
             modelProfileId: agent.defaultModelProfileId,
+            cliToolProfileId: agent.defaultCliToolProfileId || undefined,
             executionMode: agent.defaultExecutionMode
           }
         : { agentProfileId: undefined }
@@ -103,22 +124,37 @@ export const CardDetailDrawer = ({
   };
 
   return (
-    <aside className="drawer">
-      <header className="drawer-header">
+    <div className="detail-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        aria-label={`Card detail: ${card.title}`}
+        aria-modal="true"
+        className="detail-modal"
+        role="dialog"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+      <header className="detail-modal-header drawer-header">
         <div>
           <p className="eyebrow">{BOARD_COLUMNS.find((column) => column.id === card.columnId)?.title}</p>
           <h2>{card.title}</h2>
         </div>
         <button className="icon-button" title="Close details" type="button" onClick={onClose}>
-          <PanelRightClose size={18} />
+          <X size={18} />
         </button>
       </header>
 
+      <div className="detail-modal-body">
       <div className="drawer-actions">
-        <button type="button" onClick={() => onRunCliAgent(card.id)}>
-          <Play size={15} />
-          Run CLI Agent
-        </button>
+        {card.runnerType === "cli" ? (
+          <button type="button" onClick={() => onRunCliAgent(card.id)}>
+            <Play size={15} />
+            Run CLI Agent
+          </button>
+        ) : (
+          <button type="button" onClick={() => onRunPlanOnly(card.id)}>
+            <Play size={15} />
+            Run API Model
+          </button>
+        )}
         {card.locked ? <span className="status-pill warning-text">Locked</span> : null}
         <button type="button" onClick={() => onApplyPatch(card.id)}>
           <Play size={15} />
@@ -185,31 +221,46 @@ export const CardDetailDrawer = ({
         </label>
 
         <label>
-          Model profile
-          <select value={card.modelProfileId} onChange={(event) => onUpdateCard(card.id, { modelProfileId: event.target.value })}>
-            <option value="">No model selected</option>
-            {workspace.modelProfiles.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.name}
-              </option>
-            ))}
+          Runner
+          <select
+            value={card.runnerType}
+            onChange={(event) => onUpdateCard(card.id, { runnerType: event.target.value as KanbanCard["runnerType"] })}
+          >
+            <option value="cli">CLI Agent</option>
+            <option value="api">API Model</option>
           </select>
         </label>
 
-        <label>
-          CLI profile
-          <select
-            value={card.cliToolProfileId ?? workspace.defaultCliToolProfileId}
-            onChange={(event) => onUpdateCard(card.id, { cliToolProfileId: event.target.value || undefined })}
-          >
-            <option value="">No CLI selected</option>
-            {workspace.cliToolProfiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {card.runnerType === "api" ? (
+          <label>
+            API model profile
+            <select value={card.modelProfileId} onChange={(event) => onUpdateCard(card.id, { modelProfileId: event.target.value })}>
+              <option value="">No model selected</option>
+              {workspace.modelProfiles.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
+        {card.runnerType === "cli" ? (
+          <label>
+            CLI profile
+            <select
+              value={card.cliToolProfileId ?? workspace.defaultCliToolProfileId}
+              onChange={(event) => onUpdateCard(card.id, { cliToolProfileId: event.target.value || undefined })}
+            >
+              <option value="">No CLI selected</option>
+              {workspace.cliToolProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         <label>
           Execution mode
@@ -359,14 +410,17 @@ export const CardDetailDrawer = ({
           <h3>Execution Preview</h3>
           <pre>{executionPreview}</pre>
           <div className="review-actions">
-            <button type="button" onClick={() => onRunPlanOnly(card.id)}>
-              <Play size={15} />
-              Run Plan Only
-            </button>
-            <button type="button" onClick={() => onRunCliAgent(card.id)}>
-              <Play size={15} />
-              Run CLI Agent
-            </button>
+            {card.runnerType === "api" ? (
+              <button type="button" onClick={() => onRunPlanOnly(card.id)}>
+                <Play size={15} />
+                Run API Model
+              </button>
+            ) : (
+              <button type="button" onClick={() => onRunCliAgent(card.id)}>
+                <Play size={15} />
+                Run CLI Agent
+              </button>
+            )}
             <button type="button" onClick={() => onSimulateExecution(card.id)}>
               <Play size={15} />
               {card.columnId === "in-process" ? "Finish Simulation" : "Start Simulation"}
@@ -533,9 +587,11 @@ export const CardDetailDrawer = ({
       </section>
 
       <footer className="drawer-meta">
-        Created {new Date(card.createdAt).toLocaleString()} · Updated {new Date(card.updatedAt).toLocaleString()}
+        Created {new Date(card.createdAt).toLocaleString()} / Updated {new Date(card.updatedAt).toLocaleString()}
       </footer>
-    </aside>
+      </div>
+      </section>
+    </div>
   );
 };
 

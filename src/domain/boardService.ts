@@ -23,9 +23,10 @@ export const createCard = (workspace: Workspace, columnId: BoardColumnId): Works
     title: "Untitled agent task",
     description: "Write the implementation plan here.",
     skillIds: defaultAgent?.skillIds ?? [],
-    modelProfileId: workspace.defaultModelProfileId,
+    runnerType: defaultAgent?.defaultRunnerType ?? (workspace.defaultCliToolProfileId ? "cli" : "api"),
+    modelProfileId: defaultAgent?.defaultModelProfileId ?? workspace.defaultModelProfileId,
     agentProfileId: defaultAgent?.id,
-    cliToolProfileId: workspace.defaultCliToolProfileId || undefined,
+    cliToolProfileId: defaultAgent?.defaultCliToolProfileId || workspace.defaultCliToolProfileId || undefined,
     executionMode: defaultAgent?.defaultExecutionMode ?? "Suggest Patch",
     projectContext: createDefaultProjectContext(workspace.repoPath),
     safetySettings: createDefaultSafetySettings(),
@@ -521,11 +522,12 @@ export const recordPrResult = (
 const logsForMove = (card: KanbanCard, targetColumnId: BoardColumnId, workspace: Workspace) => {
   if (targetColumnId === "start-implement") {
     const model = workspace.modelProfiles.find((profile) => profile.id === card.modelProfileId);
+    const cliTool = workspace.cliToolProfiles.find((profile) => profile.id === card.cliToolProfileId);
     const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
     return [
       createLogEntry("Moved to Start Implement"),
       createLogEntry("Execution preview created"),
-      createLogEntry(buildExecutionPreview(card, model, skills))
+      createLogEntry(buildExecutionPreview(card, model, skills, cliTool))
     ];
   }
 

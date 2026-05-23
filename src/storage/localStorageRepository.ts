@@ -1,6 +1,6 @@
 import { createSeedState } from "../data/seed";
 import { createDefaultCliToolProfiles, createDefaultProjectContext } from "../domain/defaults";
-import type { AppState } from "../domain/types";
+import type { AppState, CliToolProfile } from "../domain/types";
 
 const STORAGE_KEY = "kanban-agent.state.v1";
 
@@ -39,6 +39,7 @@ const normalizeAppState = (state: AppState): AppState => ({
       ...workspace,
       repoPath: workspace.repoPath ?? "",
       defaultBranch: workspace.defaultBranch ?? "main",
+      defaultModelProfileId: workspace.defaultModelProfileId ?? workspace.modelProfiles[0]?.id ?? "",
       defaultCliToolProfileId: workspace.defaultCliToolProfileId || cliToolProfiles[0]?.id || "",
       allowedEditableFolders: workspace.allowedEditableFolders ?? "",
       blockedFilePatterns: workspace.blockedFilePatterns ?? ".env, *.pem, *.key",
@@ -49,13 +50,20 @@ const normalizeAppState = (state: AppState): AppState => ({
         ...skill,
         version: skill.version ?? "0.1.0"
       })),
-      cliToolProfiles,
+      cliToolProfiles: cliToolProfiles.map(normalizeCliToolProfile),
       agentProfiles: workspace.agentProfiles.map((agent) => ({
         ...agent,
+        defaultRunnerType:
+          agent.defaultRunnerType ?? (agent.defaultCliToolProfileId || workspace.defaultCliToolProfileId ? "cli" : "api"),
+        defaultModelProfileId: agent.defaultModelProfileId ?? workspace.defaultModelProfileId ?? workspace.modelProfiles[0]?.id ?? "",
+        defaultCliToolProfileId: agent.defaultCliToolProfileId ?? workspace.defaultCliToolProfileId ?? cliToolProfiles[0]?.id ?? "",
         defaultExecutionMode: agent.defaultExecutionMode ?? "Suggest Patch"
       })),
       cards: workspace.cards.map((card) => ({
         ...card,
+        runnerType: card.runnerType ?? (card.cliToolProfileId ? "cli" : "api"),
+        modelProfileId: card.modelProfileId ?? workspace.defaultModelProfileId ?? workspace.modelProfiles[0]?.id ?? "",
+        cliToolProfileId: card.cliToolProfileId ?? workspace.defaultCliToolProfileId ?? cliToolProfiles[0]?.id,
         patchText: card.patchText ?? "",
         testOutput: card.testOutput ?? "",
         buildOutput: card.buildOutput ?? "",
@@ -77,3 +85,21 @@ const normalizeAppState = (state: AppState): AppState => ({
     };
   })
 });
+
+const normalizeCliToolProfile = (profile: CliToolProfile): CliToolProfile => {
+  if (profile.provider === "Claude Code" && profile.command === "claude" && !profile.args.trim()) {
+    return {
+      ...profile,
+      args: "-p"
+    };
+  }
+
+  if (profile.provider === "Codex" && profile.command === "codex" && !profile.args.trim()) {
+    return {
+      ...profile,
+      args: "exec -"
+    };
+  }
+
+  return profile;
+};
