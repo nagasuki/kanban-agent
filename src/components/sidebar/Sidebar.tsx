@@ -4,6 +4,7 @@ import type { AgentProfile, AppState, ModelProfile, SkillPreset, Workspace } fro
 import { AgentEditor } from "../agents/AgentEditor";
 import { ModelEditor } from "../models/ModelEditor";
 import { SkillEditor } from "../skills/SkillEditor";
+import { RepoStatusPanel } from "../workspace/RepoStatusPanel";
 
 interface SidebarProps {
   state: AppState;
@@ -11,6 +12,8 @@ interface SidebarProps {
   onSelectWorkspace: (workspaceId: string) => void;
   onCreateWorkspace: () => void;
   onDeleteWorkspace: (workspaceId: string) => void;
+  onInspectRepo: () => void;
+  onSelectRepoFolder: () => void;
   onUpdateWorkspace: (updates: Partial<Workspace>) => void;
   onReset: () => void;
   onCreateSkill: () => void;
@@ -33,6 +36,8 @@ export const Sidebar = ({
   onSelectWorkspace,
   onCreateWorkspace,
   onDeleteWorkspace,
+  onInspectRepo,
+  onSelectRepoFolder,
   onUpdateWorkspace,
   onReset,
   onCreateSkill,
@@ -114,6 +119,11 @@ export const Sidebar = ({
               placeholder="D:\project"
             />
           </label>
+          <RepoStatusPanel
+            inspection={activeWorkspace.repoInspection}
+            onRefresh={onInspectRepo}
+            onSelectFolder={onSelectRepoFolder}
+          />
           <label>
             Default branch
             <input
@@ -269,7 +279,7 @@ export const Sidebar = ({
 
       <div className="sidebar-footer">
         <Trash2 size={14} />
-        Local-first storage in browser localStorage
+        Board state is local. Secrets use Electron secure storage.
       </div>
     </aside>
   );

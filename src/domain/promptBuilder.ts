@@ -51,6 +51,9 @@ export const buildAgentPrompt = (
     "Extra prompt notes:",
     card.projectContext.extraPromptNotes || "None.",
     "",
+    "Attached file context:",
+    card.projectContext.attachedFileContext || "No file context attached.",
+    "",
     "Project notes:",
     card.projectContext.notes || "None."
   ].join("\n");

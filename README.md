@@ -32,5 +32,12 @@ npm run dev:web
 - Generated system/user/final prompt preview from card, skills, model, workspace, and safety context
 - Plan Only dry-run path that saves output to review without editing files
 - Masked API key placeholder field and structural connection-test button
+- Electron secure key bridge using `safeStorage`; secrets are kept out of localStorage
+- OpenAI-compatible Plan Only calls for OpenAI and Custom API profiles when a secure key is stored
+- Streamed Plan Only chunks are appended to the card activity log
+- Repo folder selection and inspection through the Electron bridge
+- Git status summary with branch, dirty state, and changed files
+- Safety-aware file tree that blocks configured patterns and outside-allowed folders
+- Attached file context loader for selected card target files
 
-No real AI API calls are implemented yet.
+Anthropic and Google provider modules are scaffolded, but their real API call formats still need provider-specific implementation.

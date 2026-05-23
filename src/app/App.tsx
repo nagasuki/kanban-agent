@@ -3,9 +3,11 @@ import { Board } from "../components/board/Board";
 import { CardDetailDrawer } from "../components/drawer/CardDetailDrawer";
 import { Sidebar } from "../components/sidebar/Sidebar";
 import { runPlanOnly } from "../agent/agentRunner";
+import { repoBridge } from "../desktop/repoBridge";
 import { createAgentProfile, deleteAgentProfile, updateAgentProfile } from "../domain/agentService";
 import {
   applyReviewAction,
+  appendCardLog,
   cancelExecution,
   completePlanOnlyExecution,
   createCard,
@@ -92,6 +94,20 @@ export const App = () => {
     setSelectedCardId(null);
   };
 
+  const inspectWorkspaceRepo = async (workspace: Workspace): Promise<Workspace> => {
+    const inspection = await repoBridge.inspect({
+      allowedEditableFolders: workspace.allowedEditableFolders,
+      blockedFilePatterns: workspace.blockedFilePatterns,
+      repoPath: workspace.repoPath
+    });
+
+    return {
+      ...workspace,
+      repoInspection: inspection,
+      updatedAt: nowIso()
+    };
+  };
+
   if (!activeWorkspace) {
     return null;
   }
@@ -118,6 +134,35 @@ export const App = () => {
     }));
   };
 
+  const handleInspectRepo = async () => {
+    const next = await inspectWorkspaceRepo(activeWorkspace);
+    setWarning(next.repoInspection?.warnings[0] ?? null);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? next : workspace
+      )
+    }));
+  };
+
+  const handleSelectRepoFolder = async () => {
+    const result = await repoBridge.selectFolder();
+    if (!result.ok || !result.path) {
+      setWarning(result.message);
+      return;
+    }
+
+    const withPath = { ...activeWorkspace, repoPath: result.path, updatedAt: nowIso() };
+    const inspected = await inspectWorkspaceRepo(withPath);
+    setWarning(inspected.repoInspection?.warnings[0] ?? null);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? inspected : workspace
+      )
+    }));
+  };
+
   const handleRunPlanOnly = async (cardId: string) => {
     const card = activeWorkspace.cards.find((item) => item.id === cardId);
     if (!card) {
@@ -132,13 +177,70 @@ export const App = () => {
       )
     }));
 
-    const result = await runPlanOnly(activeWorkspace, card);
+    const result = await runPlanOnly(activeWorkspace, card, (message) => {
+      setState((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((workspace) =>
+          workspace.id === current.activeWorkspaceId ? appendCardLog(workspace, cardId, message) : workspace
+        )
+      }));
+    }).catch((error: unknown) => ({
+      provider: "runner",
+      summary: "Plan Only execution failed.",
+      rawText: error instanceof Error ? error.message : "Unknown Plan Only execution error."
+    }));
     setState((current) => ({
       ...current,
       workspaces: current.workspaces.map((workspace) =>
         workspace.id === current.activeWorkspaceId ? completePlanOnlyExecution(workspace, cardId, result) : workspace
       )
     }));
+  };
+
+  const handleLoadAttachedFiles = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+
+    const files = card.projectContext.targetFiles
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (files.length === 0) {
+      setWarning("Attach at least one target file before loading file context.");
+      return;
+    }
+
+    const loaded = await Promise.all(
+      files.map(async (relativePath) => ({
+        relativePath,
+        result: await repoBridge.readFile({
+          allowedEditableFolders: activeWorkspace.allowedEditableFolders,
+          blockedFilePatterns: activeWorkspace.blockedFilePatterns,
+          relativePath,
+          repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
+        })
+      }))
+    );
+
+    const firstFailure = loaded.find((item) => !item.result.ok);
+    setWarning(firstFailure?.result.message ?? null);
+
+    const attachedFileContext = loaded
+      .filter((item) => item.result.ok)
+      .map((item) => [`# ${item.relativePath}`, item.result.content].join("\n"))
+      .join("\n\n---\n\n");
+
+    updateActiveWorkspace((workspace) =>
+      updateCard(workspace, cardId, {
+        projectContext: {
+          ...card.projectContext,
+          attachedFileContext
+        }
+      })
+    );
   };
 
   const handleDeleteCard = (cardId: string) => {
@@ -161,6 +263,8 @@ export const App = () => {
         }}
         onCreateWorkspace={handleCreateWorkspace}
         onDeleteWorkspace={handleDeleteWorkspace}
+        onInspectRepo={handleInspectRepo}
+        onSelectRepoFolder={handleSelectRepoFolder}
         onUpdateWorkspace={(updates) => {
           updateActiveWorkspace((workspace) => ({ ...workspace, ...updates, updatedAt: nowIso() }));
         }}
@@ -227,6 +331,7 @@ export const App = () => {
         onSimulateExecution={(cardId) => updateActiveWorkspace((workspace) => simulateExecution(workspace, cardId))}
         onCancelExecution={(cardId) => updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId))}
         onRunPlanOnly={handleRunPlanOnly}
+        onLoadAttachedFiles={handleLoadAttachedFiles}
       />
     </div>
   );

@@ -16,4 +16,5 @@ const providers: Record<ModelProvider, ModelProviderClient> = {
 
 export const getModelProviderClient = (provider: ModelProvider): ModelProviderClient => providers[provider];
 
-export const testModelConnection = (model: ModelProfile) => getModelProviderClient(model.provider).testConnection(model);
+export const testModelConnection = (model: ModelProfile, apiKey?: string | null) =>
+  getModelProviderClient(model.provider).testConnection(model, apiKey);

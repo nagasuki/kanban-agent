@@ -26,6 +26,7 @@ export const createDefaultProjectContext = (repoPath = ""): ProjectContext => ({
   targetFolders: "",
   relatedDocuments: "",
   relatedIssueLink: "",
+  attachedFileContext: "",
   extraPromptNotes: "",
   notes: ""
 });

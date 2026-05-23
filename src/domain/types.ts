@@ -55,8 +55,28 @@ export interface ProjectContext {
   targetFolders: string;
   relatedDocuments: string;
   relatedIssueLink: string;
+  attachedFileContext: string;
   extraPromptNotes: string;
   notes: string;
+}
+
+export interface FileTreeNode {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+  blocked: boolean;
+  children?: FileTreeNode[];
+}
+
+export interface RepoInspection {
+  repoPath: string;
+  scannedAt: string;
+  isGitRepo: boolean;
+  currentBranch: string;
+  dirty: boolean;
+  changedFiles: string[];
+  fileTree: FileTreeNode[];
+  warnings: string[];
 }
 
 export interface SkillPreset {
@@ -124,6 +144,7 @@ export interface Workspace {
   blockedFilePatterns: string;
   testCommand: string;
   buildCommand: string;
+  repoInspection?: RepoInspection;
   cards: KanbanCard[];
   skills: SkillPreset[];
   modelProfiles: ModelProfile[];

@@ -37,6 +37,7 @@ const normalizeAppState = (state: AppState): AppState => ({
     blockedFilePatterns: workspace.blockedFilePatterns ?? ".env, *.pem, *.key",
     testCommand: workspace.testCommand ?? "",
     buildCommand: workspace.buildCommand ?? "",
+    repoInspection: workspace.repoInspection,
     skills: workspace.skills.map((skill) => ({
       ...skill,
       version: skill.version ?? "0.1.0"

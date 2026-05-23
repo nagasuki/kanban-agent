@@ -3,6 +3,7 @@ import { BOARD_COLUMNS, EXECUTION_MODES } from "../../domain/constants";
 import { buildExecutionPreview } from "../../domain/executionService";
 import { buildAgentPrompt } from "../../domain/promptBuilder";
 import type { BoardColumnId, KanbanCard, Workspace } from "../../domain/types";
+import { FileTreePicker } from "./FileTreePicker";
 
 interface CardDetailDrawerProps {
   card: KanbanCard | undefined;
@@ -15,6 +16,7 @@ interface CardDetailDrawerProps {
   onSimulateExecution: (cardId: string) => void;
   onCancelExecution: (cardId: string) => void;
   onRunPlanOnly: (cardId: string) => void;
+  onLoadAttachedFiles: (cardId: string) => void;
 }
 
 const safetyLabels: Record<keyof KanbanCard["safetySettings"], string> = {
@@ -45,7 +47,8 @@ export const CardDetailDrawer = ({
   onReviewAction,
   onSimulateExecution,
   onCancelExecution,
-  onRunPlanOnly
+  onRunPlanOnly,
+  onLoadAttachedFiles
 }: CardDetailDrawerProps) => {
   if (!card) {
     return <aside className="drawer drawer-empty">Select a card to inspect the agent context.</aside>;
@@ -69,6 +72,19 @@ export const CardDetailDrawer = ({
           }
         : { agentProfileId: undefined }
     );
+  };
+  const attachFile = (path: string) => {
+    const files = splitList(card.projectContext.targetFiles);
+    if (files.includes(path)) {
+      return;
+    }
+
+    onUpdateCard(card.id, {
+      projectContext: {
+        ...card.projectContext,
+        targetFiles: [...files, path].join(", ")
+      }
+    });
   };
 
   return (
@@ -249,6 +265,31 @@ export const CardDetailDrawer = ({
             }
           />
         </label>
+        <div className="repo-meta-row">
+          <span>{workspace.repoInspection?.isGitRepo ? `Branch ${workspace.repoInspection.currentBranch}` : "Git status unavailable"}</span>
+          <span className={workspace.repoInspection?.dirty ? "warning-text" : "success-text"}>
+            {workspace.repoInspection?.dirty ? "Dirty repo" : "No dirty repo warning"}
+          </span>
+        </div>
+        <FileTreePicker nodes={workspace.repoInspection?.fileTree ?? []} onAttachFile={attachFile} />
+        <button className="empty-action" type="button" onClick={() => onLoadAttachedFiles(card.id)}>
+          Load Attached File Context
+        </button>
+        <label>
+          Attached file context
+          <textarea
+            rows={6}
+            value={card.projectContext.attachedFileContext}
+            onChange={(event) =>
+              onUpdateCard(card.id, {
+                projectContext: {
+                  ...card.projectContext,
+                  attachedFileContext: event.target.value
+                }
+              })
+            }
+          />
+        </label>
       </section>
 
       <section className="drawer-section">
@@ -383,3 +424,9 @@ export const CardDetailDrawer = ({
     </aside>
   );
 };
+
+const splitList = (value: string): string[] =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
