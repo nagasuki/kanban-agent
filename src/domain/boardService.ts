@@ -266,6 +266,61 @@ export const cancelExecution = (workspace: Workspace, cardId: string): Workspace
   };
 };
 
+export const startPlanOnlyExecution = (workspace: Workspace, cardId: string): Workspace => {
+  const timestamp = nowIso();
+  return {
+    ...workspace,
+    cards: workspace.cards.map((card) =>
+      card.id === cardId
+        ? {
+            ...card,
+            columnId: "in-process",
+            activityLog: [
+              ...card.activityLog,
+              createLogEntry("Plan Only execution started"),
+              createLogEntry("Building prompt from plan, skills, and project context")
+            ],
+            updatedAt: timestamp
+          }
+        : card
+    ),
+    updatedAt: timestamp
+  };
+};
+
+export const completePlanOnlyExecution = (
+  workspace: Workspace,
+  cardId: string,
+  result: { summary: string; rawText: string; provider: string }
+): Workspace => {
+  const timestamp = nowIso();
+  return {
+    ...workspace,
+    cards: workspace.cards.map((card) =>
+      card.id === cardId
+        ? {
+            ...card,
+            columnId: "in-review",
+            resultSummary: result.summary,
+            diffPlaceholder: result.rawText,
+            reviewChecklist: {
+              ...card.reviewChecklist,
+              scopeMatchesPlan: true,
+              summaryIsClear: true
+            },
+            activityLog: [
+              ...card.activityLog,
+              createLogEntry(`Plan Only response received from ${result.provider}`, "success"),
+              createLogEntry("Implementation completed and ready for review", "success")
+            ],
+            updatedAt: timestamp
+          }
+        : card
+    ),
+    updatedAt: timestamp
+  };
+};
+
 const logsForMove = (card: KanbanCard, targetColumnId: BoardColumnId, workspace: Workspace) => {
   if (targetColumnId === "start-implement") {
     const model = workspace.modelProfiles.find((profile) => profile.id === card.modelProfileId);

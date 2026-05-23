@@ -1,4 +1,6 @@
 import { Trash2 } from "lucide-react";
+import { useState } from "react";
+import { testModelConnection } from "../../agent/providers/providerRegistry";
 import { MODEL_PROVIDERS } from "../../domain/constants";
 import type { ModelProfile } from "../../domain/types";
 
@@ -9,6 +11,13 @@ interface ModelEditorProps {
 }
 
 export const ModelEditor = ({ model, onUpdate, onDelete }: ModelEditorProps) => {
+  const [connectionMessage, setConnectionMessage] = useState<string>("");
+
+  const handleTestConnection = async () => {
+    const result = await testModelConnection(model);
+    setConnectionMessage(result.message);
+  };
+
   return (
     <section className="mini-editor">
       <div className="mini-editor-actions">
@@ -32,8 +41,10 @@ export const ModelEditor = ({ model, onUpdate, onDelete }: ModelEditorProps) => 
         <input value={model.modelName} onChange={(event) => onUpdate({ modelName: event.target.value })} />
       </label>
       <label>
-        API key placeholder
+        API key env / placeholder
         <input
+          autoComplete="off"
+          type="password"
           value={model.apiKeyPlaceholder}
           onChange={(event) => onUpdate({ apiKeyPlaceholder: event.target.value })}
         />
@@ -68,6 +79,11 @@ export const ModelEditor = ({ model, onUpdate, onDelete }: ModelEditorProps) => 
           />
         </label>
       </div>
+      <button className="empty-action" type="button" onClick={handleTestConnection}>
+        Test Connection
+      </button>
+      {connectionMessage ? <p className="helper-text">{connectionMessage}</p> : null}
+      <p className="helper-text">Secret values are not persisted yet. Use an environment variable name or placeholder.</p>
     </section>
   );
 };

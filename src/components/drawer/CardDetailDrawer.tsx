@@ -1,6 +1,7 @@
 import { Copy, PanelRightClose, Play, RotateCcw, ShieldCheck, Trash2, Undo2 } from "lucide-react";
 import { BOARD_COLUMNS, EXECUTION_MODES } from "../../domain/constants";
 import { buildExecutionPreview } from "../../domain/executionService";
+import { buildAgentPrompt } from "../../domain/promptBuilder";
 import type { BoardColumnId, KanbanCard, Workspace } from "../../domain/types";
 
 interface CardDetailDrawerProps {
@@ -13,6 +14,7 @@ interface CardDetailDrawerProps {
   onReviewAction: (cardId: string, action: "approve" | "request-changes" | "retry" | "rollback") => void;
   onSimulateExecution: (cardId: string) => void;
   onCancelExecution: (cardId: string) => void;
+  onRunPlanOnly: (cardId: string) => void;
 }
 
 const safetyLabels: Record<keyof KanbanCard["safetySettings"], string> = {
@@ -42,7 +44,8 @@ export const CardDetailDrawer = ({
   onDuplicateCard,
   onReviewAction,
   onSimulateExecution,
-  onCancelExecution
+  onCancelExecution,
+  onRunPlanOnly
 }: CardDetailDrawerProps) => {
   if (!card) {
     return <aside className="drawer drawer-empty">Select a card to inspect the agent context.</aside>;
@@ -50,7 +53,9 @@ export const CardDetailDrawer = ({
 
   const selectedSkills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
   const selectedModel = workspace.modelProfiles.find((model) => model.id === card.modelProfileId);
+  const selectedAgent = workspace.agentProfiles.find((agent) => agent.id === card.agentProfileId);
   const executionPreview = buildExecutionPreview(card, selectedModel, selectedSkills);
+  const generatedPrompt = buildAgentPrompt(card, workspace, selectedModel, selectedSkills, selectedAgent);
   const applyAgentProfile = (agentId: string) => {
     const agent = workspace.agentProfiles.find((profile) => profile.id === agentId);
     onUpdateCard(
@@ -274,6 +279,10 @@ export const CardDetailDrawer = ({
           <h3>Execution Preview</h3>
           <pre>{executionPreview}</pre>
           <div className="review-actions">
+            <button type="button" onClick={() => onRunPlanOnly(card.id)}>
+              <Play size={15} />
+              Run Plan Only
+            </button>
             <button type="button" onClick={() => onSimulateExecution(card.id)}>
               <Play size={15} />
               {card.columnId === "in-process" ? "Finish Simulation" : "Start Simulation"}
@@ -285,6 +294,11 @@ export const CardDetailDrawer = ({
           </div>
         </section>
       ) : null}
+
+      <section className="drawer-section preview-panel">
+        <h3>Final Prompt Preview</h3>
+        <pre>{generatedPrompt.finalPromptPreview}</pre>
+      </section>
 
       <section className="drawer-section">
         <h3>Review</h3>

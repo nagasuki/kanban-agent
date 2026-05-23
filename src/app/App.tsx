@@ -2,15 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { Board } from "../components/board/Board";
 import { CardDetailDrawer } from "../components/drawer/CardDetailDrawer";
 import { Sidebar } from "../components/sidebar/Sidebar";
+import { runPlanOnly } from "../agent/agentRunner";
 import { createAgentProfile, deleteAgentProfile, updateAgentProfile } from "../domain/agentService";
 import {
   applyReviewAction,
   cancelExecution,
+  completePlanOnlyExecution,
   createCard,
   deleteCard,
   duplicateCard,
   moveCard,
   simulateExecution,
+  startPlanOnlyExecution,
   updateCard
 } from "../domain/boardService";
 import { createId, nowIso } from "../domain/id";
@@ -115,6 +118,29 @@ export const App = () => {
     }));
   };
 
+  const handleRunPlanOnly = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+
+    const startedWorkspace = startPlanOnlyExecution(activeWorkspace, cardId);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? startedWorkspace : workspace
+      )
+    }));
+
+    const result = await runPlanOnly(activeWorkspace, card);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? completePlanOnlyExecution(workspace, cardId, result) : workspace
+      )
+    }));
+  };
+
   const handleDeleteCard = (cardId: string) => {
     updateActiveWorkspace((workspace) => deleteCard(workspace, cardId));
     setSelectedCardId(null);
@@ -200,6 +226,7 @@ export const App = () => {
         }
         onSimulateExecution={(cardId) => updateActiveWorkspace((workspace) => simulateExecution(workspace, cardId))}
         onCancelExecution={(cardId) => updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId))}
+        onRunPlanOnly={handleRunPlanOnly}
       />
     </div>
   );

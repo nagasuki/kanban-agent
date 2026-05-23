@@ -92,6 +92,7 @@ label {
 
 .brand-block span,
 .sidebar-footer,
+.helper-text,
 .column-header p,
 .kanban-card p,
 .card-footer,
@@ -564,6 +565,12 @@ label {
   padding-top: 14px;
   color: #75859a;
   font-size: 12px;
+}
+
+.helper-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 ::-webkit-scrollbar {
