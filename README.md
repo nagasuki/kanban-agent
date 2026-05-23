@@ -48,5 +48,8 @@ npm run dev:web
 - PR draft fields for title, description, and URL
 - Draft PR creation through GitHub CLI (`gh pr create --draft`) after approval
 - Card search, skill/model/status filters, and compact board view
+- Top navigation bar with workspace selector, search, model indicator, and Settings entry
+- Settings modal with Appearance category and persistent Light/Dark/System theme switching
+- CSS-variable theme system applied across navbar, board, cards, drawer, inputs, buttons, badges, and logs
 
 Anthropic and Google provider modules are scaffolded, but their real API call formats still need provider-specific implementation.
