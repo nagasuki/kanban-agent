@@ -1,5 +1,5 @@
 import { createId, nowIso } from "./id";
-import type { ActivityLogEntry, ProjectContext, ReviewChecklist, SafetySettings } from "./types";
+import type { ActivityLogEntry, CliToolProfile, ProjectContext, ReviewChecklist, SafetySettings } from "./types";
 
 export const createDefaultSafetySettings = (): SafetySettings => ({
   previewDiffBeforeApply: true,
@@ -40,3 +40,29 @@ export const createLogEntry = (
   level,
   timestamp: nowIso()
 });
+
+export const createDefaultCliToolProfiles = (): CliToolProfile[] => {
+  const timestamp = nowIso();
+  return [
+    {
+      id: createId("cli"),
+      name: "Claude Code",
+      provider: "Claude Code",
+      command: "claude",
+      args: "",
+      timeoutSeconds: 600,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    },
+    {
+      id: createId("cli"),
+      name: "Codex CLI",
+      provider: "Codex",
+      command: "codex",
+      args: "",
+      timeoutSeconds: 600,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+  ];
+};

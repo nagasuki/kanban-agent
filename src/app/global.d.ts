@@ -27,6 +27,37 @@ declare global {
             repoPath: string;
           }
         ) => Promise<{ ok: boolean; content: string; message: string }>;
+        applyPatch: (
+          options: {
+            allowedEditableFolders: string;
+            blockedFilePatterns: string;
+            patchText: string;
+            repoPath: string;
+          }
+        ) => Promise<{ ok: boolean; output: string; backupPath: string }>;
+        runCommand: (options: { command: string; repoPath: string }) => Promise<{ ok: boolean; output: string }>;
+        gitCommit: (options: { message: string; repoPath: string }) => Promise<{ ok: boolean; output: string }>;
+        gitCheckoutFiles: (options: { files: string; repoPath: string }) => Promise<{ ok: boolean; output: string }>;
+        githubPr: (
+          options: { body: string; repoPath: string; title: string }
+        ) => Promise<{ ok: boolean; url: string; output: string }>;
+      };
+      cli?: {
+        run: (
+          options: {
+            args: string;
+            command: string;
+            cwd: string;
+            prompt: string;
+            timeoutSeconds: number;
+          }
+        ) => Promise<{
+          ok: boolean;
+          exitCode: number | null;
+          stdout: string;
+          stderr: string;
+          timedOut: boolean;
+        }>;
       };
     };
   }

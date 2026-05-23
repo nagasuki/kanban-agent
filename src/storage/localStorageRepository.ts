@@ -1,5 +1,5 @@
 import { createSeedState } from "../data/seed";
-import { createDefaultProjectContext } from "../domain/defaults";
+import { createDefaultCliToolProfiles, createDefaultProjectContext } from "../domain/defaults";
 import type { AppState } from "../domain/types";
 
 const STORAGE_KEY = "kanban-agent.state.v1";
@@ -29,33 +29,51 @@ export const resetAppState = (): AppState => {
 
 const normalizeAppState = (state: AppState): AppState => ({
   ...state,
-  workspaces: state.workspaces.map((workspace) => ({
-    ...workspace,
-    repoPath: workspace.repoPath ?? "",
-    defaultBranch: workspace.defaultBranch ?? "main",
-    allowedEditableFolders: workspace.allowedEditableFolders ?? "",
-    blockedFilePatterns: workspace.blockedFilePatterns ?? ".env, *.pem, *.key",
-    testCommand: workspace.testCommand ?? "",
-    buildCommand: workspace.buildCommand ?? "",
-    repoInspection: workspace.repoInspection,
-    skills: workspace.skills.map((skill) => ({
-      ...skill,
-      version: skill.version ?? "0.1.0"
-    })),
-    agentProfiles: workspace.agentProfiles.map((agent) => ({
-      ...agent,
-      defaultExecutionMode: agent.defaultExecutionMode ?? "Suggest Patch"
-    })),
-    cards: workspace.cards.map((card) => ({
-      ...card,
-      safetySettings: {
-        ...card.safetySettings,
-        requireApprovalBeforePr: card.safetySettings.requireApprovalBeforePr ?? true
-      },
-      projectContext: {
-        ...createDefaultProjectContext(workspace.repoPath),
-        ...card.projectContext
-      }
-    }))
-  }))
+  workspaces: state.workspaces.map((workspace) => {
+    const cliToolProfiles =
+      workspace.cliToolProfiles && workspace.cliToolProfiles.length > 0
+        ? workspace.cliToolProfiles
+        : createDefaultCliToolProfiles();
+
+    return {
+      ...workspace,
+      repoPath: workspace.repoPath ?? "",
+      defaultBranch: workspace.defaultBranch ?? "main",
+      defaultCliToolProfileId: workspace.defaultCliToolProfileId || cliToolProfiles[0]?.id || "",
+      allowedEditableFolders: workspace.allowedEditableFolders ?? "",
+      blockedFilePatterns: workspace.blockedFilePatterns ?? ".env, *.pem, *.key",
+      testCommand: workspace.testCommand ?? "",
+      buildCommand: workspace.buildCommand ?? "",
+      repoInspection: workspace.repoInspection,
+      skills: workspace.skills.map((skill) => ({
+        ...skill,
+        version: skill.version ?? "0.1.0"
+      })),
+      cliToolProfiles,
+      agentProfiles: workspace.agentProfiles.map((agent) => ({
+        ...agent,
+        defaultExecutionMode: agent.defaultExecutionMode ?? "Suggest Patch"
+      })),
+      cards: workspace.cards.map((card) => ({
+        ...card,
+        patchText: card.patchText ?? "",
+        testOutput: card.testOutput ?? "",
+        buildOutput: card.buildOutput ?? "",
+        applyOutput: card.applyOutput ?? "",
+        commitMessage: card.commitMessage ?? "",
+        prTitle: card.prTitle ?? "",
+        prDescription: card.prDescription ?? "",
+        prUrl: card.prUrl ?? "",
+        locked: card.locked ?? false,
+        safetySettings: {
+          ...card.safetySettings,
+          requireApprovalBeforePr: card.safetySettings.requireApprovalBeforePr ?? true
+        },
+        projectContext: {
+          ...createDefaultProjectContext(workspace.repoPath),
+          ...card.projectContext
+        }
+      }))
+    };
+  })
 });

@@ -17,6 +17,8 @@ export type ExecutionMode =
 
 export type ModelProvider = "OpenAI" | "Anthropic" | "Google" | "Local" | "Custom API";
 
+export type CliToolProvider = "Claude Code" | "Codex" | "Custom CLI";
+
 export interface BoardColumn {
   id: BoardColumnId;
   title: string;
@@ -113,6 +115,17 @@ export interface ModelProfile {
   updatedAt: string;
 }
 
+export interface CliToolProfile {
+  id: string;
+  name: string;
+  provider: CliToolProvider;
+  command: string;
+  args: string;
+  timeoutSeconds: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface KanbanCard {
   id: string;
   workspaceId: string;
@@ -122,6 +135,7 @@ export interface KanbanCard {
   skillIds: string[];
   modelProfileId: string;
   agentProfileId?: string;
+  cliToolProfileId?: string;
   executionMode: ExecutionMode;
   projectContext: ProjectContext;
   safetySettings: SafetySettings;
@@ -129,6 +143,15 @@ export interface KanbanCard {
   activityLog: ActivityLogEntry[];
   resultSummary: string;
   diffPlaceholder: string;
+  patchText: string;
+  testOutput: string;
+  buildOutput: string;
+  applyOutput: string;
+  commitMessage: string;
+  prTitle: string;
+  prDescription: string;
+  prUrl: string;
+  locked: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -140,6 +163,7 @@ export interface Workspace {
   defaultBranch: string;
   defaultModelProfileId: string;
   defaultAgentProfileId: string;
+  defaultCliToolProfileId: string;
   allowedEditableFolders: string;
   blockedFilePatterns: string;
   testCommand: string;
@@ -148,6 +172,7 @@ export interface Workspace {
   cards: KanbanCard[];
   skills: SkillPreset[];
   modelProfiles: ModelProfile[];
+  cliToolProfiles: CliToolProfile[];
   agentProfiles: AgentProfile[];
   createdAt: string;
   updatedAt: string;

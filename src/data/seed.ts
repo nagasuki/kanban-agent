@@ -1,5 +1,6 @@
 import {
   createDefaultProjectContext,
+  createDefaultCliToolProfiles,
   createDefaultReviewChecklist,
   createDefaultSafetySettings,
   createLogEntry
@@ -99,6 +100,7 @@ export const createSeedState = (): AppState => {
   ];
 
   const agentProfileId = createId("agent");
+  const cliProfiles = createDefaultCliToolProfiles();
   const cards: KanbanCard[] = [
     createSeedCard({
       workspaceId,
@@ -139,6 +141,7 @@ export const createSeedState = (): AppState => {
     defaultBranch: "main",
     defaultModelProfileId: models[0].id,
     defaultAgentProfileId: agentProfileId,
+    defaultCliToolProfileId: cliProfiles[0].id,
     allowedEditableFolders: "src, electron, docs",
     blockedFilePatterns: ".env, *.pem, *.key, secrets.*",
     testCommand: "npm run typecheck",
@@ -146,6 +149,7 @@ export const createSeedState = (): AppState => {
     cards,
     skills,
     modelProfiles: models,
+    cliToolProfiles: cliProfiles,
     agentProfiles: [
       {
         id: agentProfileId,
@@ -188,6 +192,7 @@ const createSeedCard = (input: {
     skillIds: input.skillIds,
     modelProfileId: input.modelProfileId,
     agentProfileId: undefined,
+    cliToolProfileId: undefined,
     executionMode: "Suggest Patch",
     projectContext: {
       ...createDefaultProjectContext(input.repoPath),
@@ -204,6 +209,15 @@ const createSeedCard = (input: {
     activityLog: [createLogEntry("Seed card created")],
     resultSummary: input.columnId === "in-review" ? "Simulated docs update is ready for review." : "",
     diffPlaceholder: input.columnId === "in-review" ? "Diff placeholder: README.md would be updated." : "",
+    patchText: "",
+    testOutput: "",
+    buildOutput: "",
+    applyOutput: "",
+    commitMessage: "",
+    prTitle: "",
+    prDescription: "",
+    prUrl: "",
+    locked: false,
     createdAt: timestamp,
     updatedAt: timestamp
   };

@@ -5,17 +5,47 @@ import { KanbanCardItem } from "../cards/KanbanCardItem";
 
 interface BoardProps {
   workspace: Workspace;
+  compact: boolean;
+  filterModelId: string;
+  filterSkillId: string;
+  filterStatus: string;
+  searchQuery: string;
   selectedCardId: string | null;
   onSelectCard: (cardId: string) => void;
   onCreateCard: (columnId: BoardColumnId) => void;
   onMoveCard: (cardId: string, targetColumnId: BoardColumnId) => void;
 }
 
-export const Board = ({ workspace, selectedCardId, onSelectCard, onCreateCard, onMoveCard }: BoardProps) => {
+export const Board = ({
+  workspace,
+  compact,
+  filterModelId,
+  filterSkillId,
+  filterStatus,
+  searchQuery,
+  selectedCardId,
+  onSelectCard,
+  onCreateCard,
+  onMoveCard
+}: BoardProps) => {
+  const query = searchQuery.trim().toLowerCase();
+  const visibleCards = workspace.cards.filter((card) => {
+    const matchesQuery =
+      !query ||
+      [card.title, card.description, card.projectContext.targetFiles, card.projectContext.targetFolders]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    const matchesSkill = !filterSkillId || card.skillIds.includes(filterSkillId);
+    const matchesModel = !filterModelId || card.modelProfileId === filterModelId;
+    const matchesStatus = !filterStatus || card.columnId === filterStatus;
+    return matchesQuery && matchesSkill && matchesModel && matchesStatus;
+  });
+
   return (
-    <section className="board" aria-label="Kanban board">
+    <section className={`board ${compact ? "compact-board" : ""}`} aria-label="Kanban board">
       {BOARD_COLUMNS.map((column) => {
-        const cards = workspace.cards.filter((card) => card.columnId === column.id);
+        const cards = visibleCards.filter((card) => card.columnId === column.id);
 
         return (
           <article

@@ -3,18 +3,27 @@ import { Board } from "../components/board/Board";
 import { CardDetailDrawer } from "../components/drawer/CardDetailDrawer";
 import { Sidebar } from "../components/sidebar/Sidebar";
 import { runPlanOnly } from "../agent/agentRunner";
+import { runCliAgent } from "../agent/cliRunner";
 import { repoBridge } from "../desktop/repoBridge";
 import { createAgentProfile, deleteAgentProfile, updateAgentProfile } from "../domain/agentService";
+import { createCliToolProfile, deleteCliToolProfile, updateCliToolProfile } from "../domain/cliToolService";
+import { createDefaultCliToolProfiles } from "../domain/defaults";
 import {
   applyReviewAction,
   appendCardLog,
   cancelExecution,
   completePlanOnlyExecution,
+  completeCliExecution,
   createCard,
   deleteCard,
   duplicateCard,
   moveCard,
+  generatePrDraft,
+  recordCommandResult,
+  recordPatchApplyResult,
+  recordPrResult,
   simulateExecution,
+  startCliExecution,
   startPlanOnlyExecution,
   updateCard
 } from "../domain/boardService";
@@ -28,6 +37,11 @@ export const App = () => {
   const [state, setState] = useState<AppState>(() => loadAppState());
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterSkillId, setFilterSkillId] = useState("");
+  const [filterModelId, setFilterModelId] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [compactBoard, setCompactBoard] = useState(false);
 
   useEffect(() => {
     saveAppState(state);
@@ -52,6 +66,7 @@ export const App = () => {
   const handleCreateWorkspace = () => {
     const timestamp = nowIso();
     const workspaceId = createId("workspace");
+    const cliToolProfiles = createDefaultCliToolProfiles();
     const workspace: Workspace = {
       id: workspaceId,
       name: "New Workspace",
@@ -59,6 +74,7 @@ export const App = () => {
       defaultBranch: "main",
       defaultModelProfileId: "",
       defaultAgentProfileId: "",
+      defaultCliToolProfileId: cliToolProfiles[0]?.id ?? "",
       allowedEditableFolders: "",
       blockedFilePatterns: ".env, *.pem, *.key",
       testCommand: "",
@@ -66,6 +82,7 @@ export const App = () => {
       cards: [],
       skills: [],
       modelProfiles: [],
+      cliToolProfiles,
       agentProfiles: [],
       createdAt: timestamp,
       updatedAt: timestamp
@@ -243,9 +260,151 @@ export const App = () => {
     );
   };
 
+  const handleRunCliAgent = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+    if (card.locked) {
+      setWarning("This card is locked by a running task.");
+      return;
+    }
+
+    const profile = activeWorkspace.cliToolProfiles.find(
+      (item) => item.id === (card.cliToolProfileId || activeWorkspace.defaultCliToolProfileId)
+    );
+    if (!profile) {
+      setWarning("Select a CLI profile before running Claude Code / Codex.");
+      return;
+    }
+
+    const startedWorkspace = startCliExecution(activeWorkspace, cardId);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? startedWorkspace : workspace
+      )
+    }));
+
+    const result = await runCliAgent(activeWorkspace, card, profile).catch((error: unknown) => ({
+      ok: false,
+      provider: profile.name,
+      summary: "CLI agent execution failed.",
+      rawText: error instanceof Error ? error.message : "Unknown CLI execution error."
+    }));
+
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? completeCliExecution(workspace, cardId, result) : workspace
+      )
+    }));
+  };
+
   const handleDeleteCard = (cardId: string) => {
     updateActiveWorkspace((workspace) => deleteCard(workspace, cardId));
     setSelectedCardId(null);
+  };
+
+  const handleGeneratePrDraft = (cardId: string) => {
+    updateActiveWorkspace((workspace) => generatePrDraft(workspace, cardId));
+  };
+
+  const handleApplyPatch = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+
+    if (!card.reviewChecklist.userApproved) {
+      setWarning("Approve the review checklist before applying a patch.");
+      return;
+    }
+
+    const patchText = card.patchText || card.diffPlaceholder;
+    if (!patchText.trim()) {
+      setWarning("No patch text is saved on this card.");
+      return;
+    }
+
+    const result = await repoBridge.applyPatch({
+      allowedEditableFolders: activeWorkspace.allowedEditableFolders,
+      blockedFilePatterns: activeWorkspace.blockedFilePatterns,
+      patchText,
+      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
+    });
+    setWarning(result.ok ? null : result.output);
+    updateActiveWorkspace((workspace) => recordPatchApplyResult(workspace, cardId, result));
+  };
+
+  const handleRunWorkspaceCommand = async (cardId: string, kind: "test" | "build") => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+
+    const command = kind === "test" ? activeWorkspace.testCommand : activeWorkspace.buildCommand;
+    const result = await repoBridge.runCommand({
+      command,
+      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
+    });
+    setWarning(result.ok ? null : result.output);
+    updateActiveWorkspace((workspace) => recordCommandResult(workspace, cardId, kind, result));
+  };
+
+  const handleCommit = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+
+    if (card.safetySettings.requireApprovalBeforeCommit && !card.reviewChecklist.userApproved) {
+      setWarning("Approval is required before commit.");
+      return;
+    }
+
+    const message = card.commitMessage || card.title;
+    const result = await repoBridge.gitCommit({
+      message,
+      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
+    });
+    setWarning(result.ok ? null : result.output);
+    updateActiveWorkspace((workspace) => recordCommandResult(workspace, cardId, "rollback", result));
+  };
+
+  const handleRollbackFiles = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+
+    const files = card.projectContext.targetFiles || card.projectContext.targetPaths;
+    const result = await repoBridge.gitCheckoutFiles({
+      files,
+      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
+    });
+    setWarning(result.ok ? null : result.output);
+    updateActiveWorkspace((workspace) => recordCommandResult(workspace, cardId, "commit", result));
+  };
+
+  const handleCreatePr = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+
+    if (card.safetySettings.requireApprovalBeforePr && !card.reviewChecklist.userApproved) {
+      setWarning("Approval is required before creating a PR.");
+      return;
+    }
+
+    const result = await repoBridge.githubPr({
+      title: card.prTitle || card.title,
+      body: card.prDescription || card.resultSummary,
+      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
+    });
+    setWarning(result.ok ? null : result.output);
+    updateActiveWorkspace((workspace) => recordPrResult(workspace, cardId, result));
   };
 
   const handleDuplicateCard = (cardId: string) => {
@@ -281,6 +440,11 @@ export const App = () => {
           updateActiveWorkspace((workspace) => updateModelProfile(workspace, modelId, updates))
         }
         onDeleteModel={(modelId) => updateActiveWorkspace((workspace) => deleteModelProfile(workspace, modelId))}
+        onCreateCliTool={() => updateActiveWorkspace(createCliToolProfile)}
+        onUpdateCliTool={(profileId, updates) =>
+          updateActiveWorkspace((workspace) => updateCliToolProfile(workspace, profileId, updates))
+        }
+        onDeleteCliTool={(profileId) => updateActiveWorkspace((workspace) => deleteCliToolProfile(workspace, profileId))}
         onCreateAgent={() => updateActiveWorkspace(createAgentProfile)}
         onUpdateAgent={(agentId, updates) =>
           updateActiveWorkspace((workspace) => updateAgentProfile(workspace, agentId, updates))
@@ -307,8 +471,51 @@ export const App = () => {
           </button>
         ) : null}
 
+        <section className="board-toolbar">
+          <input
+            aria-label="Search cards"
+            placeholder="Search cards"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+          <select aria-label="Filter by skill" value={filterSkillId} onChange={(event) => setFilterSkillId(event.target.value)}>
+            <option value="">All skills</option>
+            {activeWorkspace.skills.map((skill) => (
+              <option key={skill.id} value={skill.id}>
+                {skill.name}
+              </option>
+            ))}
+          </select>
+          <select aria-label="Filter by model" value={filterModelId} onChange={(event) => setFilterModelId(event.target.value)}>
+            <option value="">All models</option>
+            {activeWorkspace.modelProfiles.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.name}
+              </option>
+            ))}
+          </select>
+          <select aria-label="Filter by status" value={filterStatus} onChange={(event) => setFilterStatus(event.target.value)}>
+            <option value="">All statuses</option>
+            <option value="my-plan">My Plan</option>
+            <option value="skill-used">Skill Used</option>
+            <option value="start-implement">Start Implement</option>
+            <option value="in-process">In Process</option>
+            <option value="in-review">In Review</option>
+            <option value="successfully">Successfully</option>
+          </select>
+          <label className="toolbar-toggle">
+            <input checked={compactBoard} type="checkbox" onChange={(event) => setCompactBoard(event.target.checked)} />
+            Compact
+          </label>
+        </section>
+
         <Board
           workspace={activeWorkspace}
+          compact={compactBoard}
+          filterModelId={filterModelId}
+          filterSkillId={filterSkillId}
+          filterStatus={filterStatus}
+          searchQuery={searchQuery}
           selectedCardId={selectedCardId}
           onSelectCard={setSelectedCardId}
           onCreateCard={handleCreateCard}
@@ -332,6 +539,13 @@ export const App = () => {
         onCancelExecution={(cardId) => updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId))}
         onRunPlanOnly={handleRunPlanOnly}
         onLoadAttachedFiles={handleLoadAttachedFiles}
+        onRunCliAgent={handleRunCliAgent}
+        onApplyPatch={handleApplyPatch}
+        onRunWorkspaceCommand={handleRunWorkspaceCommand}
+        onCommit={handleCommit}
+        onGeneratePrDraft={handleGeneratePrDraft}
+        onRollbackFiles={handleRollbackFiles}
+        onCreatePr={handleCreatePr}
       />
     </div>
   );

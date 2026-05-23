@@ -102,7 +102,7 @@ label {
 
 .segmented {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 4px;
   border: 1px solid #273142;
   border-radius: 8px;
@@ -264,7 +264,7 @@ label {
 .main-panel {
   display: grid;
   min-width: 0;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
   padding: 18px 18px 16px;
@@ -315,6 +315,27 @@ label {
   background: #2a2111;
   color: #ffd37a;
   padding: 0 12px;
+}
+
+.board-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.toolbar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #c8d2df;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.toolbar-toggle input {
+  width: 16px;
+  height: 16px;
 }
 
 .board {
@@ -409,6 +430,17 @@ label {
   line-height: 1.55;
 }
 
+.compact-board .kanban-card {
+  gap: 7px;
+  padding: 9px;
+}
+
+.compact-board .kanban-card p,
+.compact-board .card-chip-row,
+.compact-board .review-meter {
+  display: none;
+}
+
 .success-icon {
   flex: 0 0 auto;
   color: #6ee7a7;
@@ -464,7 +496,8 @@ label {
 }
 
 .repo-status-grid span,
-.repo-meta-row span {
+.repo-meta-row span,
+.status-pill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -571,6 +604,44 @@ label {
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.diff-viewer {
+  display: block;
+  max-height: 320px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid #243145;
+  border-radius: 8px;
+  background: #070b10;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.diff-viewer span {
+  display: inline;
+}
+
+.diff-add {
+  color: #87efac;
+}
+
+.diff-remove {
+  color: #ff9a9a;
+}
+
+.diff-hunk {
+  color: #95d8ff;
+}
+
+.diff-meta {
+  color: #d8c18b;
+}
+
+.diff-context {
+  color: #cbd5e1;
 }
 
 .file-tree {

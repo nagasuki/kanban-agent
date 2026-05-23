@@ -3,6 +3,7 @@ import { BOARD_COLUMNS, EXECUTION_MODES } from "../../domain/constants";
 import { buildExecutionPreview } from "../../domain/executionService";
 import { buildAgentPrompt } from "../../domain/promptBuilder";
 import type { BoardColumnId, KanbanCard, Workspace } from "../../domain/types";
+import { DiffViewer } from "../diff/DiffViewer";
 import { FileTreePicker } from "./FileTreePicker";
 
 interface CardDetailDrawerProps {
@@ -17,6 +18,13 @@ interface CardDetailDrawerProps {
   onCancelExecution: (cardId: string) => void;
   onRunPlanOnly: (cardId: string) => void;
   onLoadAttachedFiles: (cardId: string) => void;
+  onRunCliAgent: (cardId: string) => void;
+  onApplyPatch: (cardId: string) => void;
+  onRunWorkspaceCommand: (cardId: string, kind: "test" | "build") => void;
+  onCommit: (cardId: string) => void;
+  onGeneratePrDraft: (cardId: string) => void;
+  onRollbackFiles: (cardId: string) => void;
+  onCreatePr: (cardId: string) => void;
 }
 
 const safetyLabels: Record<keyof KanbanCard["safetySettings"], string> = {
@@ -48,7 +56,14 @@ export const CardDetailDrawer = ({
   onSimulateExecution,
   onCancelExecution,
   onRunPlanOnly,
-  onLoadAttachedFiles
+  onLoadAttachedFiles,
+  onRunCliAgent,
+  onApplyPatch,
+  onRunWorkspaceCommand,
+  onCommit,
+  onGeneratePrDraft,
+  onRollbackFiles,
+  onCreatePr
 }: CardDetailDrawerProps) => {
   if (!card) {
     return <aside className="drawer drawer-empty">Select a card to inspect the agent context.</aside>;
@@ -100,6 +115,15 @@ export const CardDetailDrawer = ({
       </header>
 
       <div className="drawer-actions">
+        <button type="button" onClick={() => onRunCliAgent(card.id)}>
+          <Play size={15} />
+          Run CLI Agent
+        </button>
+        {card.locked ? <span className="status-pill warning-text">Locked</span> : null}
+        <button type="button" onClick={() => onApplyPatch(card.id)}>
+          <Play size={15} />
+          Apply Patch
+        </button>
         <button type="button" onClick={() => onDuplicateCard(card.id)}>
           <Copy size={15} />
           Duplicate
@@ -167,6 +191,21 @@ export const CardDetailDrawer = ({
             {workspace.modelProfiles.map((model) => (
               <option key={model.id} value={model.id}>
                 {model.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          CLI profile
+          <select
+            value={card.cliToolProfileId ?? workspace.defaultCliToolProfileId}
+            onChange={(event) => onUpdateCard(card.id, { cliToolProfileId: event.target.value || undefined })}
+          >
+            <option value="">No CLI selected</option>
+            {workspace.cliToolProfiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name}
               </option>
             ))}
           </select>
@@ -324,6 +363,10 @@ export const CardDetailDrawer = ({
               <Play size={15} />
               Run Plan Only
             </button>
+            <button type="button" onClick={() => onRunCliAgent(card.id)}>
+              <Play size={15} />
+              Run CLI Agent
+            </button>
             <button type="button" onClick={() => onSimulateExecution(card.id)}>
               <Play size={15} />
               {card.columnId === "in-process" ? "Finish Simulation" : "Start Simulation"}
@@ -394,11 +437,82 @@ export const CardDetailDrawer = ({
           />
         </label>
         <label>
-          Diff placeholder
+          Patch text
+          <textarea
+            rows={6}
+            value={card.patchText || card.diffPlaceholder}
+            onChange={(event) => onUpdateCard(card.id, { patchText: event.target.value })}
+          />
+        </label>
+        <DiffViewer value={card.patchText || card.diffPlaceholder} />
+        <div className="review-actions">
+          <button type="button" onClick={() => onRunWorkspaceCommand(card.id, "test")}>
+            <Play size={15} />
+            Run Test
+          </button>
+          <button type="button" onClick={() => onRunWorkspaceCommand(card.id, "build")}>
+            <Play size={15} />
+            Run Build
+          </button>
+          <button type="button" onClick={() => onCommit(card.id)}>
+            <Play size={15} />
+          Commit
+          </button>
+          <button type="button" onClick={() => onGeneratePrDraft(card.id)}>
+            <Play size={15} />
+            Draft PR
+          </button>
+          <button type="button" onClick={() => onCreatePr(card.id)}>
+            <Play size={15} />
+            Create PR
+          </button>
+          <button type="button" onClick={() => onRollbackFiles(card.id)}>
+            <Undo2 size={15} />
+            Rollback Files
+          </button>
+        </div>
+        <label>
+          Commit message
+          <input value={card.commitMessage} onChange={(event) => onUpdateCard(card.id, { commitMessage: event.target.value })} />
+        </label>
+        <label>
+          PR title
+          <input value={card.prTitle} onChange={(event) => onUpdateCard(card.id, { prTitle: event.target.value })} />
+        </label>
+        <label>
+          PR description
+          <textarea
+            rows={5}
+            value={card.prDescription}
+            onChange={(event) => onUpdateCard(card.id, { prDescription: event.target.value })}
+          />
+        </label>
+        <label>
+          PR URL
+          <input value={card.prUrl} onChange={(event) => onUpdateCard(card.id, { prUrl: event.target.value })} />
+        </label>
+        <label>
+          Test output
           <textarea
             rows={4}
-            value={card.diffPlaceholder}
-            onChange={(event) => onUpdateCard(card.id, { diffPlaceholder: event.target.value })}
+            value={card.testOutput}
+            onChange={(event) => onUpdateCard(card.id, { testOutput: event.target.value })}
+          />
+        </label>
+        <label>
+          Build output
+          <textarea
+            rows={4}
+            value={card.buildOutput}
+            onChange={(event) => onUpdateCard(card.id, { buildOutput: event.target.value })}
+          />
+        </label>
+        <label>
+          Apply output
+          <textarea
+            rows={3}
+            value={card.applyOutput}
+            onChange={(event) => onUpdateCard(card.id, { applyOutput: event.target.value })}
           />
         </label>
       </section>

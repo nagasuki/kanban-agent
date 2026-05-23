@@ -1,7 +1,8 @@
 import { Database, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
-import type { AgentProfile, AppState, ModelProfile, SkillPreset, Workspace } from "../../domain/types";
+import type { AgentProfile, AppState, CliToolProfile, ModelProfile, SkillPreset, Workspace } from "../../domain/types";
 import { AgentEditor } from "../agents/AgentEditor";
+import { CliToolEditor } from "../cli/CliToolEditor";
 import { ModelEditor } from "../models/ModelEditor";
 import { SkillEditor } from "../skills/SkillEditor";
 import { RepoStatusPanel } from "../workspace/RepoStatusPanel";
@@ -23,12 +24,15 @@ interface SidebarProps {
   onCreateModel: () => void;
   onUpdateModel: (modelId: string, updates: Partial<ModelProfile>) => void;
   onDeleteModel: (modelId: string) => void;
+  onCreateCliTool: () => void;
+  onUpdateCliTool: (profileId: string, updates: Partial<CliToolProfile>) => void;
+  onDeleteCliTool: (profileId: string) => void;
   onCreateAgent: () => void;
   onUpdateAgent: (agentId: string, updates: Partial<AgentProfile>) => void;
   onDeleteAgent: (agentId: string) => void;
 }
 
-type SidebarTab = "workspace" | "skills" | "models" | "agents";
+type SidebarTab = "workspace" | "skills" | "models" | "cli" | "agents";
 
 export const Sidebar = ({
   state,
@@ -47,6 +51,9 @@ export const Sidebar = ({
   onCreateModel,
   onUpdateModel,
   onDeleteModel,
+  onCreateCliTool,
+  onUpdateCliTool,
+  onDeleteCliTool,
   onCreateAgent,
   onUpdateAgent,
   onDeleteAgent
@@ -72,6 +79,9 @@ export const Sidebar = ({
         </button>
         <button className={tab === "models" ? "active" : ""} type="button" onClick={() => setTab("models")}>
           Models
+        </button>
+        <button className={tab === "cli" ? "active" : ""} type="button" onClick={() => setTab("cli")}>
+          CLI
         </button>
         <button className={tab === "agents" ? "active" : ""} type="button" onClick={() => setTab("agents")}>
           Agents
@@ -161,6 +171,20 @@ export const Sidebar = ({
             </select>
           </label>
           <label>
+            Default CLI
+            <select
+              value={activeWorkspace.defaultCliToolProfileId}
+              onChange={(event) => onUpdateWorkspace({ defaultCliToolProfileId: event.target.value })}
+            >
+              <option value="">No default CLI</option>
+              {activeWorkspace.cliToolProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             Allowed editable folders
             <input
               value={activeWorkspace.allowedEditableFolders}
@@ -244,6 +268,33 @@ export const Sidebar = ({
             <button className="empty-action" type="button" onClick={onCreateModel}>
               <Plus size={16} />
               Add the first model profile
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {tab === "cli" ? (
+        <div className="sidebar-section">
+          <div className="section-title-row">
+            <h2>CLI Agents</h2>
+            <button className="icon-button" title="Create CLI profile" type="button" onClick={onCreateCliTool}>
+              <Plus size={16} />
+            </button>
+          </div>
+          <div className="editor-stack">
+            {activeWorkspace.cliToolProfiles.map((profile) => (
+              <CliToolEditor
+                key={profile.id}
+                profile={profile}
+                onUpdate={(updates) => onUpdateCliTool(profile.id, updates)}
+                onDelete={() => onDeleteCliTool(profile.id)}
+              />
+            ))}
+          </div>
+          {activeWorkspace.cliToolProfiles.length === 0 ? (
+            <button className="empty-action" type="button" onClick={onCreateCliTool}>
+              <Plus size={16} />
+              Add the first CLI profile
             </button>
           ) : null}
         </div>
