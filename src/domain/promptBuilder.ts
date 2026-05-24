@@ -68,6 +68,38 @@ export const buildAgentPrompt = (
   };
 };
 
+export const buildPlanDraftPrompt = (
+  card: KanbanCard,
+  workspace: Workspace,
+  model: ModelProfile | undefined,
+  skills: SkillPreset[],
+  agent: AgentProfile | undefined,
+  cliTool?: CliToolProfile | undefined
+): GeneratedPrompt => {
+  const basePrompt = buildAgentPrompt(card, workspace, model, skills, agent, cliTool);
+  const systemPrompt = [
+    basePrompt.systemPrompt,
+    "",
+    "Plan Mode:",
+    "You are only writing the implementation plan for this Kanban card.",
+    "Do not edit files, run commands, produce patches, commit, or open pull requests.",
+    "Return a clear markdown plan that can be saved directly as the card description.",
+    "Include assumptions, target areas, step-by-step implementation approach, validation plan, and review risks."
+  ].join("\n");
+  const userPrompt = [
+    "The user typed a raw requirement. Convert it into a complete implementation plan.",
+    "Keep the plan practical and scoped for a coding agent workflow.",
+    "",
+    basePrompt.userPrompt
+  ].join("\n");
+
+  return {
+    systemPrompt,
+    userPrompt,
+    finalPromptPreview: [`# System Prompt`, systemPrompt, "", "# User Prompt", userPrompt].join("\n")
+  };
+};
+
 const formatSkillMarkdown = (skill: SkillPreset): string =>
   [`## ${skill.name} v${skill.version}`, skill.description, "", skill.markdown].join("\n");
 

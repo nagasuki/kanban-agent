@@ -432,6 +432,27 @@ label {
   animation: modalScale 140ms ease-out;
 }
 
+.plan-prompt-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(680px, calc(100vw - 56px));
+  max-height: min(560px, calc(100vh - 56px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  animation: modalScale 140ms ease-out;
+}
+
+.plan-prompt-body {
+  display: grid;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 20px 20px;
+}
+
 .detail-modal-header {
   position: sticky;
   top: 0;
@@ -763,6 +784,21 @@ label {
   border-radius: 10px;
   background: #0f151e;
   padding: 12px;
+  position: relative;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.board-column.drag-over {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-2));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 34%, transparent),
+    0 16px 42px color-mix(in srgb, var(--accent) 14%, transparent);
+  transform: translateY(-1px);
 }
 
 .column-header p {
@@ -781,11 +817,64 @@ label {
   padding: 0 10px;
 }
 
+.column-action-row {
+  display: grid;
+  gap: 8px;
+}
+
+.column-add.primary {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent) 20%, var(--panel-4));
+  color: var(--text-strong);
+}
+
+.column-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .card-list {
   align-content: start;
   min-height: 0;
   overflow: auto;
   padding: 2px 3px 2px 0;
+  scroll-behavior: smooth;
+}
+
+.card-drop-frame {
+  position: relative;
+}
+
+.card-drop-frame::before,
+.card-drop-frame::after {
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  z-index: 2;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--accent) 70%, transparent);
+  content: "";
+  opacity: 0;
+  transform: scaleX(0.82);
+  transition:
+    opacity 110ms ease,
+    transform 140ms ease;
+}
+
+.card-drop-frame::before {
+  top: -6px;
+}
+
+.card-drop-frame::after {
+  bottom: -6px;
+}
+
+.card-drop-frame.drop-before::before,
+.card-drop-frame.drop-after::after {
+  opacity: 1;
+  transform: scaleX(1);
 }
 
 .kanban-card {
@@ -795,15 +884,27 @@ label {
   cursor: grab;
   user-select: none;
   transition:
-    transform 140ms ease,
-    border-color 140ms ease,
-    background 140ms ease,
-    box-shadow 140ms ease;
+    opacity 150ms ease,
+    transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 150ms ease,
+    background 150ms ease,
+    box-shadow 170ms ease,
+    filter 150ms ease;
+  will-change: transform;
 }
 
 .kanban-card:active {
   cursor: grabbing;
   transform: scale(0.99);
+}
+
+.kanban-card.dragging {
+  opacity: 0.42;
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel-3));
+  box-shadow: 0 22px 48px rgb(0 0 0 / 0.34);
+  filter: saturate(1.08);
+  transform: rotate(1deg) scale(0.985);
 }
 
 .kanban-card:focus-visible {
@@ -824,6 +925,26 @@ label {
 .kanban-card:hover {
   transform: translateY(-1px);
   box-shadow: 0 10px 28px rgb(0 0 0 / 0.16);
+}
+
+.drop-preview {
+  display: grid;
+  min-height: 58px;
+  place-items: center;
+  border: 1px dashed color-mix(in srgb, var(--accent) 72%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-sunken));
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 800;
+  animation: dropPreviewIn 140ms ease-out;
+}
+
+@keyframes dropPreviewIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
 }
 
 .kanban-card h3 {

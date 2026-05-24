@@ -1,4 +1,5 @@
-import { Plus } from "lucide-react";
+import { Play, Plus } from "lucide-react";
+import { useEffect, useState } from "react";
 import { BOARD_COLUMNS } from "../../domain/constants";
 import { canUserCreateCard } from "../../domain/boardService";
 import type { BoardColumnId, Workspace } from "../../domain/types";
@@ -15,6 +16,8 @@ interface BoardProps {
   onSelectCard: (cardId: string) => void;
   onCreateCard: (columnId: BoardColumnId) => void;
   onMoveCard: (cardId: string, targetColumnId: BoardColumnId) => void;
+  onReorderCard: (cardId: string, targetColumnId: BoardColumnId, targetIndex: number) => void;
+  onStartImplementAll: () => void;
 }
 
 export const Board = ({
@@ -27,8 +30,33 @@ export const Board = ({
   selectedCardId,
   onSelectCard,
   onCreateCard,
-  onMoveCard
+  onMoveCard,
+  onReorderCard,
+  onStartImplementAll
 }: BoardProps) => {
+  const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
+  const [dragOverColumnId, setDragOverColumnId] = useState<BoardColumnId | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ cardId: string; position: "before" | "after" } | null>(null);
+  useEffect(() => {
+    if (!draggingCardId) {
+      return undefined;
+    }
+
+    const clearDragState = () => {
+      setDraggingCardId(null);
+      setDragOverColumnId(null);
+      setDropTarget(null);
+    };
+
+    window.addEventListener("dragend", clearDragState);
+    window.addEventListener("drop", clearDragState);
+    window.addEventListener("blur", clearDragState);
+    return () => {
+      window.removeEventListener("dragend", clearDragState);
+      window.removeEventListener("drop", clearDragState);
+      window.removeEventListener("blur", clearDragState);
+    };
+  }, [draggingCardId]);
   const query = searchQuery.trim().toLowerCase();
   const visibleCards = workspace.cards.filter((card) => {
     const matchesQuery =
@@ -44,19 +72,51 @@ export const Board = ({
   });
 
   return (
-    <section className={`board ${compact ? "compact-board" : ""}`} aria-label="Kanban board">
+    <section
+      className={`board ${compact ? "compact-board" : ""}`}
+      aria-label="Kanban board"
+      onDragEnd={() => {
+      setDraggingCardId(null);
+      setDragOverColumnId(null);
+      setDropTarget(null);
+      }}
+      onDrop={() => {
+        setDraggingCardId(null);
+      setDragOverColumnId(null);
+      setDropTarget(null);
+    }}
+    >
       {BOARD_COLUMNS.map((column) => {
         const cards = visibleCards.filter((card) => card.columnId === column.id);
 
         return (
           <article
-            className="board-column"
+            className={`board-column ${dragOverColumnId === column.id ? "drag-over" : ""}`}
             key={column.id}
-            onDragOver={(event) => event.preventDefault()}
+            onDragEnter={() => setDragOverColumnId(column.id)}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setDragOverColumnId(null);
+              }
+            }}
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
             onDrop={(event) => {
+              event.stopPropagation();
+              const target = dropTarget;
+              setDraggingCardId(null);
+              setDragOverColumnId(null);
+              setDropTarget(null);
               const cardId = event.dataTransfer.getData("text/plain");
               if (cardId) {
-                onMoveCard(cardId, column.id);
+                const targetCardIndex = target ? cards.findIndex((card) => card.id === target.cardId) : -1;
+                if (targetCardIndex >= 0) {
+                  onReorderCard(cardId, column.id, targetCardIndex + (target?.position === "after" ? 1 : 0));
+                } else {
+                  onMoveCard(cardId, column.id);
+                }
               }
             }}
           >
@@ -69,23 +129,46 @@ export const Board = ({
             </header>
 
             {canUserCreateCard(column.id) ? (
-              <button className="column-add" type="button" onClick={() => onCreateCard(column.id)}>
-                <Plus size={16} />
-                New card
-              </button>
+              <div className="column-action-row">
+                <button className="column-add" type="button" onClick={() => onCreateCard(column.id)}>
+                  <Plus size={16} />
+                  {column.id === "my-plan" ? "New plan" : "New card"}
+                </button>
+                {column.id === "start-implement" ? (
+                  <button className="column-add primary" disabled={cards.length === 0} type="button" onClick={onStartImplementAll}>
+                    <Play size={16} />
+                    Start Implement All
+                  </button>
+                ) : null}
+              </div>
             ) : (
               <div className="system-column-note">System controlled</div>
             )}
 
             <div className="card-list">
+              {dragOverColumnId === column.id && draggingCardId ? <div className="drop-preview">Drop here</div> : null}
               {cards.map((card) => (
-                <KanbanCardItem
-                  card={card}
-                  isSelected={selectedCardId === card.id}
+                <div
+                  className={`card-drop-frame ${
+                    dropTarget?.cardId === card.id && draggingCardId !== card.id ? `drop-${dropTarget.position}` : ""
+                  }`}
                   key={card.id}
-                  workspace={workspace}
-                  onSelect={() => onSelectCard(card.id)}
-                />
+                >
+                  <KanbanCardItem
+                    card={card}
+                    isDragging={draggingCardId === card.id}
+                    isSelected={selectedCardId === card.id}
+                    workspace={workspace}
+                    onDragOverCard={(cardId, position) => setDropTarget({ cardId, position })}
+                    onDragStart={setDraggingCardId}
+                    onDragEnd={() => {
+                      setDraggingCardId(null);
+                      setDragOverColumnId(null);
+                      setDropTarget(null);
+                    }}
+                    onSelect={() => onSelectCard(card.id)}
+                  />
+                </div>
               ))}
               {cards.length === 0 ? (
                 <div className="column-empty">

@@ -14,6 +14,10 @@ export type CliToolProvider = "Claude Code" | "Codex" | "Custom CLI";
 
 export type AgentRunnerType = "api" | "cli";
 
+export type WorkspaceVersionControlProvider = "auto" | "git" | "plastic";
+
+export type DetectedVersionControlProvider = "git" | "plastic" | "none";
+
 export type TaskPriority = "Critical" | "High" | "Normal" | "Low";
 
 export type SessionStatus = "running" | "completed" | "approved" | "rejected" | "cancelled" | "failed";
@@ -134,8 +138,12 @@ export interface FileTreeNode {
 export interface RepoInspection {
   repoPath: string;
   scannedAt: string;
+  versionControlProvider: DetectedVersionControlProvider;
+  requestedVersionControlProvider: WorkspaceVersionControlProvider;
   isGitRepo: boolean;
+  isPlasticWorkspace: boolean;
   currentBranch: string;
+  branches: string[];
   dirty: boolean;
   changedFiles: string[];
   fileTree: FileTreeNode[];
@@ -230,6 +238,7 @@ export interface Workspace {
   id: string;
   name: string;
   repoPath: string;
+  versionControlProvider: WorkspaceVersionControlProvider;
   defaultBranch: string;
   defaultModelProfileId: string;
   defaultAgentProfileId: string;

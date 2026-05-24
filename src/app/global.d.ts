@@ -17,8 +17,16 @@ declare global {
             allowedEditableFolders: string;
             blockedFilePatterns: string;
             repoPath: string;
+            versionControlProvider: "auto" | "git" | "plastic";
           }
         ) => Promise<import("../domain/types").RepoInspection & { ok: boolean; message: string }>;
+        switchBranch: (
+          options: {
+            branch: string;
+            repoPath: string;
+            versionControlProvider: "git" | "plastic";
+          }
+        ) => Promise<{ ok: boolean; output: string }>;
         readFile: (
           options: {
             allowedEditableFolders: string;
@@ -37,7 +45,21 @@ declare global {
         ) => Promise<{ ok: boolean; output: string; backupPath: string }>;
         runCommand: (options: { command: string; repoPath: string }) => Promise<{ ok: boolean; output: string }>;
         gitCommit: (options: { message: string; repoPath: string }) => Promise<{ ok: boolean; output: string }>;
+        commitChanges: (
+          options: {
+            message: string;
+            repoPath: string;
+            versionControlProvider: "git" | "plastic";
+          }
+        ) => Promise<{ ok: boolean; output: string }>;
         gitCheckoutFiles: (options: { files: string; repoPath: string }) => Promise<{ ok: boolean; output: string }>;
+        rollbackFiles: (
+          options: {
+            files: string;
+            repoPath: string;
+            versionControlProvider: "git" | "plastic";
+          }
+        ) => Promise<{ ok: boolean; output: string }>;
         githubPr: (
           options: { body: string; repoPath: string; title: string }
         ) => Promise<{ ok: boolean; url: string; output: string }>;

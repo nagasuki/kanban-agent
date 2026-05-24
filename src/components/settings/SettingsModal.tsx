@@ -16,7 +16,7 @@ interface SettingsModalProps {
   onCreateCliTool: () => void;
   onCreateModel: () => void;
   onCreateSkill: () => void;
-  onCreateWorkspace: () => void;
+  onCreateWorkspace: () => void | Promise<void>;
   onDeleteAgent: (agentId: string) => void;
   onDeleteCliTool: (profileId: string) => void;
   onDeleteModel: (modelId: string) => void;
@@ -27,6 +27,7 @@ interface SettingsModalProps {
   onReset: () => void;
   onSelectRepoFolder: () => void;
   onSelectWorkspace: (workspaceId: string) => void;
+  onSwitchBranch: (branch: string) => void;
   onThemeChange: (mode: ThemeMode) => void;
   onUpdateAgent: (agentId: string, updates: Partial<AgentProfile>) => void;
   onUpdateCliTool: (profileId: string, updates: Partial<CliToolProfile>) => void;
@@ -44,7 +45,7 @@ type SettingsCategory =
   | "Agent Profiles"
   | "Execution Rules"
   | "Sandbox & Safety"
-  | "Git Integration"
+  | "Version Control"
   | "Appearance"
   | "Logs"
   | "Experimental";
@@ -57,7 +58,7 @@ const categories: SettingsCategory[] = [
   "Agent Profiles",
   "Execution Rules",
   "Sandbox & Safety",
-  "Git Integration",
+  "Version Control",
   "Appearance",
   "Logs",
   "Experimental"
@@ -106,7 +107,7 @@ export const SettingsModal = (props: SettingsModalProps) => {
           {category === "Appearance" ? <AppearanceSettings {...props} /> : null}
           {category === "Execution Rules" ? <PlaceholderSettings title="Execution Rules" /> : null}
           {category === "Sandbox & Safety" ? <PlaceholderSettings title="Sandbox & Safety" /> : null}
-          {category === "Git Integration" ? <PlaceholderSettings title="Git Integration" /> : null}
+          {category === "Version Control" ? <PlaceholderSettings title="Version Control" /> : null}
           {category === "Logs" ? <PlaceholderSettings title="Logs" /> : null}
           {category === "Experimental" ? <PlaceholderSettings title="Experimental" /> : null}
         </main>
@@ -124,8 +125,15 @@ const WorkspaceSettings = ({
   onReset,
   onSelectRepoFolder,
   onSelectWorkspace,
+  onSwitchBranch,
   onUpdateWorkspace
-}: SettingsModalProps) => (
+}: SettingsModalProps) => {
+  const branchOptions =
+    activeWorkspace.repoInspection?.branches.includes(activeWorkspace.defaultBranch)
+      ? activeWorkspace.repoInspection.branches
+      : [activeWorkspace.defaultBranch, ...(activeWorkspace.repoInspection?.branches ?? [])].filter(Boolean);
+
+  return (
   <>
     <PanelHeader
       eyebrow="Workspace"
@@ -136,10 +144,14 @@ const WorkspaceSettings = ({
     <div className="settings-section">
       <div className="section-title-row">
         <h4>Projects</h4>
-        <button className="icon-button" title="Create workspace" type="button" onClick={onCreateWorkspace}>
+        <button className="icon-button" title="Add project from folder" type="button" onClick={onCreateWorkspace}>
           <Plus size={16} />
         </button>
       </div>
+      <button className="empty-action settings-inline-action" type="button" onClick={onCreateWorkspace}>
+        <Plus size={16} />
+        Add Project from Folder
+      </button>
       <div className="workspace-list settings-list">
         {state.workspaces.map((workspace) => (
           <div className={`workspace-item ${workspace.id === activeWorkspace.id ? "active" : ""}`} key={workspace.id}>
@@ -174,22 +186,52 @@ const WorkspaceSettings = ({
           placeholder="D:\project"
         />
       </label>
+      <label>
+        Version control
+        <select
+          value={activeWorkspace.versionControlProvider}
+          onChange={(event) =>
+            onUpdateWorkspace({ versionControlProvider: event.target.value as Workspace["versionControlProvider"] })
+          }
+        >
+          <option value="auto">Auto detect</option>
+          <option value="git">Git</option>
+          <option value="plastic">Plastic / Unity Version Control</option>
+        </select>
+      </label>
     </div>
 
     <RepoStatusPanel
       inspection={activeWorkspace.repoInspection}
       onRefresh={onInspectRepo}
       onSelectFolder={onSelectRepoFolder}
+      onSwitchBranch={onSwitchBranch}
     />
 
     <div className="settings-form-grid">
       <label>
-        Default branch
-        <input
+        Branch
+        <select
           value={activeWorkspace.defaultBranch}
-          onChange={(event) => onUpdateWorkspace({ defaultBranch: event.target.value })}
-          placeholder="main"
-        />
+          onChange={(event) => {
+            const branch = event.target.value;
+            onUpdateWorkspace({ defaultBranch: branch });
+            if (branch && branch !== activeWorkspace.repoInspection?.currentBranch) {
+              onSwitchBranch(branch);
+            }
+          }}
+        >
+          <option value={activeWorkspace.defaultBranch || ""}>
+            {activeWorkspace.defaultBranch || "No branch detected"}
+          </option>
+          {branchOptions
+            .filter((branch, index, options) => options.indexOf(branch) === index && branch !== activeWorkspace.defaultBranch)
+            .map((branch) => (
+              <option key={branch} value={branch}>
+                {branch}
+              </option>
+            ))}
+        </select>
       </label>
       <label>
         Default model
@@ -272,7 +314,8 @@ const WorkspaceSettings = ({
       Reset seed data
     </button>
   </>
-);
+  );
+};
 
 const SkillSettings = ({ activeWorkspace, onCreateSkill, onDeleteSkill, onDuplicateSkill, onUpdateSkill }: SettingsModalProps) => (
   <>

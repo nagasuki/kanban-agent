@@ -11,10 +11,11 @@ interface SidebarProps {
   state: AppState;
   activeWorkspace: Workspace;
   onSelectWorkspace: (workspaceId: string) => void;
-  onCreateWorkspace: () => void;
+  onCreateWorkspace: () => void | Promise<void>;
   onDeleteWorkspace: (workspaceId: string) => void;
   onInspectRepo: () => void;
   onSelectRepoFolder: () => void;
+  onSwitchBranch: (branch: string) => void;
   onUpdateWorkspace: (updates: Partial<Workspace>) => void;
   onReset: () => void;
   onCreateSkill: () => void;
@@ -45,6 +46,7 @@ export const Sidebar = ({
   onUpdateWorkspace,
   onReset,
   onCreateSkill,
+  onSwitchBranch,
   onUpdateSkill,
   onDuplicateSkill,
   onDeleteSkill,
@@ -92,10 +94,14 @@ export const Sidebar = ({
         <div className="sidebar-section">
           <div className="section-title-row">
             <h2>Projects</h2>
-            <button className="icon-button" title="Create workspace" type="button" onClick={onCreateWorkspace}>
+            <button className="icon-button" title="Add project from folder" type="button" onClick={onCreateWorkspace}>
               <Plus size={16} />
             </button>
           </div>
+          <button className="empty-action" type="button" onClick={onCreateWorkspace}>
+            <Plus size={16} />
+            Add Project from Folder
+          </button>
 
           <div className="workspace-list">
             {state.workspaces.map((workspace) => (
@@ -133,14 +139,44 @@ export const Sidebar = ({
             inspection={activeWorkspace.repoInspection}
             onRefresh={onInspectRepo}
             onSelectFolder={onSelectRepoFolder}
+            onSwitchBranch={onSwitchBranch}
           />
           <label>
-            Default branch
-            <input
+            Version control
+            <select
+              value={activeWorkspace.versionControlProvider}
+              onChange={(event) =>
+                onUpdateWorkspace({ versionControlProvider: event.target.value as Workspace["versionControlProvider"] })
+              }
+            >
+              <option value="auto">Auto detect</option>
+              <option value="git">Git</option>
+              <option value="plastic">Plastic / Unity Version Control</option>
+            </select>
+          </label>
+          <label>
+            Branch
+            <select
               value={activeWorkspace.defaultBranch}
-              onChange={(event) => onUpdateWorkspace({ defaultBranch: event.target.value })}
-              placeholder="main"
-            />
+              onChange={(event) => {
+                const branch = event.target.value;
+                onUpdateWorkspace({ defaultBranch: branch });
+                if (branch && branch !== activeWorkspace.repoInspection?.currentBranch) {
+                  onSwitchBranch(branch);
+                }
+              }}
+            >
+              <option value={activeWorkspace.defaultBranch || ""}>
+                {activeWorkspace.defaultBranch || "No branch detected"}
+              </option>
+              {activeWorkspace.repoInspection?.branches
+                .filter((branch) => branch !== activeWorkspace.defaultBranch)
+                .map((branch) => (
+                  <option key={branch} value={branch}>
+                    {branch}
+                  </option>
+                ))}
+            </select>
           </label>
           <label>
             Default model

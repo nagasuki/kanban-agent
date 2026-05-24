@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Board } from "../components/board/Board";
 import { CardDetailModal } from "../components/drawer/CardDetailDrawer";
+import { PlanPromptModal } from "../components/plans/PlanPromptModal";
 import { SettingsModal } from "../components/settings/SettingsModal";
 import { TopNav } from "../components/topnav/TopNav";
-import { runPlanOnly } from "../agent/agentRunner";
-import { runCliAgent } from "../agent/cliRunner";
+import { runPlanDraft, runPlanOnly } from "../agent/agentRunner";
+import { runCliAgent, runCliPlanDraft } from "../agent/cliRunner";
 import { repoBridge } from "../desktop/repoBridge";
 import { createAgentProfile, deleteAgentProfile, updateAgentProfile } from "../domain/agentService";
 import { createCliToolProfile, deleteCliToolProfile, updateCliToolProfile } from "../domain/cliToolService";
@@ -13,12 +14,15 @@ import {
   applyReviewAction,
   appendCardLog,
   cancelExecution,
+  completePlanDraft,
   completePlanOnlyExecution,
   completeCliExecution,
   createCard,
+  createPlanCardFromPrompt,
   deleteCard,
   duplicateCard,
   moveCard,
+  reorderCard,
   generatePrDraft,
   recordCommandResult,
   recordPatchApplyResult,
@@ -45,6 +49,8 @@ export const App = () => {
   const [filterStatus, setFilterStatus] = useState("");
   const [compactBoard, setCompactBoard] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [planPromptOpen, setPlanPromptOpen] = useState(false);
+  const [planGenerating, setPlanGenerating] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
 
   useEffect(() => {
@@ -85,14 +91,28 @@ export const App = () => {
     }));
   };
 
-  const handleCreateWorkspace = () => {
+  const folderNameFromPath = (folderPath: string): string =>
+    folderPath
+      .replace(/[\\/]+$/, "")
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .at(-1) || "New Project";
+
+  const handleCreateWorkspace = async () => {
+    const result = await repoBridge.selectFolder();
+    if (!result.ok || !result.path) {
+      setWarning(result.message);
+      return;
+    }
+
     const timestamp = nowIso();
     const workspaceId = createId("workspace");
     const cliToolProfiles = createDefaultCliToolProfiles();
     const workspace: Workspace = {
       id: workspaceId,
-      name: "New Workspace",
-      repoPath: "",
+      name: folderNameFromPath(result.path),
+      repoPath: result.path,
+      versionControlProvider: "auto",
       defaultBranch: "main",
       defaultModelProfileId: "",
       defaultAgentProfileId: "",
@@ -109,11 +129,13 @@ export const App = () => {
       createdAt: timestamp,
       updatedAt: timestamp
     };
+    const inspected = await inspectWorkspaceRepo(workspace);
 
     setState((current) => ({
       activeWorkspaceId: workspaceId,
-      workspaces: [workspace, ...current.workspaces]
+      workspaces: [inspected, ...current.workspaces]
     }));
+    setWarning(inspected.repoInspection?.warnings[0] ?? null);
     setSelectedCardId(null);
   };
 
@@ -137,11 +159,13 @@ export const App = () => {
     const inspection = await repoBridge.inspect({
       allowedEditableFolders: workspace.allowedEditableFolders,
       blockedFilePatterns: workspace.blockedFilePatterns,
-      repoPath: workspace.repoPath
+      repoPath: workspace.repoPath,
+      versionControlProvider: workspace.versionControlProvider
     });
 
     return {
       ...workspace,
+      defaultBranch: inspection.currentBranch || workspace.defaultBranch,
       repoInspection: inspection,
       updatedAt: nowIso()
     };
@@ -162,13 +186,119 @@ export const App = () => {
     }));
   };
 
+  const handleReorderCard = (cardId: string, targetColumnId: BoardColumnId, targetIndex: number) => {
+    const result = reorderCard(activeWorkspace, cardId, targetColumnId, targetIndex);
+    setWarning(result.warning ?? null);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? result.workspace : workspace
+      )
+    }));
+  };
+
   const handleCreateCard = (columnId: BoardColumnId) => {
+    if (columnId === "my-plan") {
+      setPlanPromptOpen(true);
+      return;
+    }
+
     const next = createCard(activeWorkspace, columnId);
     setSelectedCardId(next.cards[0]?.id ?? null);
     setState((current) => ({
       ...current,
       workspaces: current.workspaces.map((workspace) =>
         workspace.id === current.activeWorkspaceId ? next : workspace
+      )
+    }));
+  };
+
+  const handleCreatePlanFromPrompt = async (prompt: string) => {
+    const created = createPlanCardFromPrompt(activeWorkspace, prompt);
+    setWarning(created.warning ?? null);
+    if (created.warning || !created.cardId) {
+      return;
+    }
+
+    const draftCard = created.workspace.cards.find((card) => card.id === created.cardId);
+    if (!draftCard) {
+      return;
+    }
+
+    setPlanGenerating(true);
+    setPlanPromptOpen(false);
+    setSelectedCardId(created.cardId);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? created.workspace : workspace
+      )
+    }));
+
+    const cliProfile = created.workspace.cliToolProfiles.find(
+      (profile) => profile.id === (draftCard.cliToolProfileId || created.workspace.defaultCliToolProfileId)
+    ) ?? created.workspace.cliToolProfiles[0];
+
+    const result =
+      draftCard.runnerType === "cli"
+        ? cliProfile
+          ? await runCliPlanDraft(created.workspace, draftCard, cliProfile).catch((error: unknown) => ({
+              ok: false,
+              provider: "CLI",
+              summary: "CLI plan generation failed.",
+              rawText: error instanceof Error ? error.message : "Unknown CLI plan generation error."
+            }))
+          : {
+            ok: false,
+            provider: "CLI",
+            summary: "CLI plan generation failed.",
+            rawText: "Select a CLI profile before generating a plan with CLI Agent."
+          }
+        : await runPlanDraft(created.workspace, draftCard, (message) => {
+            setState((current) => ({
+              ...current,
+              workspaces: current.workspaces.map((workspace) =>
+                workspace.id === current.activeWorkspaceId ? appendCardLog(workspace, draftCard.id, message) : workspace
+              )
+            }));
+          })
+            .then((apiResult) => ({ ...apiResult, ok: true }))
+            .catch((error: unknown) => ({
+              ok: false,
+              provider: "API Model",
+              summary: "API plan generation failed.",
+              rawText: error instanceof Error ? error.message : "Unknown API plan generation error."
+            }));
+
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? completePlanDraft(workspace, draftCard.id, result) : workspace
+      )
+    }));
+    setWarning(result.ok ? null : result.rawText);
+    setPlanGenerating(false);
+  };
+
+  const handleCreateManualPlan = (prompt: string) => {
+    const created = createPlanCardFromPrompt(activeWorkspace, prompt);
+    setWarning(created.warning ?? null);
+    if (created.warning || !created.cardId) {
+      return;
+    }
+
+    const completedWorkspace = completePlanDraft(created.workspace, created.cardId, {
+      ok: true,
+      provider: "Manual Plan",
+      summary: prompt,
+      rawText: prompt
+    });
+    setPlanPromptOpen(false);
+    setSelectedCardId(created.cardId);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? completedWorkspace : workspace
       )
     }));
   };
@@ -191,8 +321,42 @@ export const App = () => {
       return;
     }
 
-    const withPath = { ...activeWorkspace, repoPath: result.path, updatedAt: nowIso() };
+    const withPath = {
+      ...activeWorkspace,
+      name: folderNameFromPath(result.path),
+      repoPath: result.path,
+      updatedAt: nowIso()
+    };
     const inspected = await inspectWorkspaceRepo(withPath);
+    setWarning(inspected.repoInspection?.warnings[0] ?? null);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? inspected : workspace
+      )
+    }));
+  };
+
+  const handleSwitchBranch = async (branch: string) => {
+    if (!activeWorkspace.repoInspection || activeWorkspace.repoInspection.versionControlProvider === "none") {
+      setWarning("Inspect a Git repository or Plastic workspace before switching branches.");
+      return;
+    }
+
+    const result = await repoBridge.switchBranch({
+      branch,
+      repoPath: activeWorkspace.repoPath,
+      versionControlProvider: activeWorkspace.repoInspection.versionControlProvider
+    });
+    if (!result.ok) {
+      setWarning(result.output);
+      return;
+    }
+
+    const inspected = await inspectWorkspaceRepo({
+      ...activeWorkspace,
+      defaultBranch: branch
+    });
     setWarning(inspected.repoInspection?.warnings[0] ?? null);
     setState((current) => ({
       ...current,
@@ -351,6 +515,99 @@ export const App = () => {
     }));
   };
 
+  const runImplementationFromWorkspace = async (workspace: Workspace, cardId: string): Promise<Workspace> => {
+    const card = workspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return workspace;
+    }
+
+    if (card.runnerType === "api") {
+      const started = startPlanOnlyExecution(workspace, cardId, "fresh");
+      setWarning(started.warning ?? null);
+      if (started.warning) {
+        return started.workspace;
+      }
+
+      let runningWorkspace = started.workspace;
+      setState((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((item) =>
+          item.id === current.activeWorkspaceId ? runningWorkspace : item
+        )
+      }));
+
+      const result = await runPlanOnly(runningWorkspace, card, (message) => {
+        runningWorkspace = appendCardLog(runningWorkspace, cardId, message);
+        setState((current) => ({
+          ...current,
+          workspaces: current.workspaces.map((item) =>
+            item.id === current.activeWorkspaceId ? runningWorkspace : item
+          )
+        }));
+      }).catch((error: unknown) => ({
+        provider: "runner",
+        summary: "Plan Only execution failed.",
+        rawText: error instanceof Error ? error.message : "Unknown Plan Only execution error."
+      }));
+
+      return completePlanOnlyExecution(runningWorkspace, cardId, result);
+    }
+
+    const profile = workspace.cliToolProfiles.find(
+      (item) => item.id === (card.cliToolProfileId || workspace.defaultCliToolProfileId)
+    );
+    if (!profile) {
+      setWarning(`Select a CLI profile before running ${card.title}.`);
+      return appendCardLog(workspace, cardId, "Queued implementation skipped: no CLI profile selected", "warning");
+    }
+
+    const started = startCliExecution(workspace, cardId, "fresh");
+    setWarning(started.warning ?? null);
+    if (started.warning) {
+      return started.workspace;
+    }
+
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((item) =>
+        item.id === current.activeWorkspaceId ? started.workspace : item
+      )
+    }));
+
+    const result = await runCliAgent(started.workspace, card, profile).catch((error: unknown) => ({
+      ok: false,
+      provider: profile.name,
+      summary: "CLI agent execution failed.",
+      rawText: error instanceof Error ? error.message : "Unknown CLI execution error."
+    }));
+
+    return completeCliExecution(started.workspace, cardId, result);
+  };
+
+  const handleStartImplementAll = async () => {
+    let queueWorkspace = activeWorkspace;
+    const queuedCardIds = queueWorkspace.cards
+      .filter((card) => card.columnId === "start-implement" && !card.locked)
+      .map((card) => card.id);
+
+    if (queuedCardIds.length === 0) {
+      setWarning("No cards are queued in Start Implement.");
+      return;
+    }
+
+    setWarning(`Starting ${queuedCardIds.length} queued implementation task${queuedCardIds.length > 1 ? "s" : ""}.`);
+    for (const cardId of queuedCardIds) {
+      queueWorkspace = await runImplementationFromWorkspace(queueWorkspace, cardId);
+      setState((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((workspace) =>
+          workspace.id === current.activeWorkspaceId ? queueWorkspace : workspace
+        )
+      }));
+    }
+    setWarning("Start Implement queue completed.");
+  };
+
   const handleDeleteCard = (cardId: string) => {
     updateActiveWorkspace((workspace) => deleteCard(workspace, cardId));
     setSelectedCardId(null);
@@ -413,10 +670,17 @@ export const App = () => {
       return;
     }
 
+    const provider = activeWorkspace.repoInspection?.versionControlProvider;
+    if (provider !== "git" && provider !== "plastic") {
+      setWarning("Inspect a Git repository or Plastic workspace before committing.");
+      return;
+    }
+
     const message = card.commitMessage || card.title;
-    const result = await repoBridge.gitCommit({
+    const result = await repoBridge.commitChanges({
       message,
-      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
+      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath,
+      versionControlProvider: provider
     });
     setWarning(result.ok ? null : result.output);
     updateActiveWorkspace((workspace) => recordCommandResult(workspace, cardId, "commit", result));
@@ -428,10 +692,17 @@ export const App = () => {
       return;
     }
 
+    const provider = activeWorkspace.repoInspection?.versionControlProvider;
+    if (provider !== "git" && provider !== "plastic") {
+      setWarning("Inspect a Git repository or Plastic workspace before rolling back files.");
+      return;
+    }
+
     const files = card.projectContext.targetFiles || card.projectContext.targetPaths;
-    const result = await repoBridge.gitCheckoutFiles({
+    const result = await repoBridge.rollbackFiles({
       files,
-      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
+      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath,
+      versionControlProvider: provider
     });
     setWarning(result.ok ? null : result.output);
     updateActiveWorkspace((workspace) => recordCommandResult(workspace, cardId, "rollback", result));
@@ -536,6 +807,8 @@ export const App = () => {
           onSelectCard={setSelectedCardId}
           onCreateCard={handleCreateCard}
           onMoveCard={handleMoveCard}
+          onReorderCard={handleReorderCard}
+          onStartImplementAll={handleStartImplementAll}
         />
         </main>
 
@@ -572,6 +845,19 @@ export const App = () => {
         onCreatePr={handleCreatePr}
       />
 
+      {planPromptOpen ? (
+        <PlanPromptModal
+          isGenerating={planGenerating}
+          onClose={() => {
+            if (!planGenerating) {
+              setPlanPromptOpen(false);
+            }
+          }}
+          onManualSubmit={handleCreateManualPlan}
+          onSubmit={handleCreatePlanFromPrompt}
+        />
+      ) : null}
+
       {settingsOpen ? (
         <SettingsModal
           activeWorkspace={activeWorkspace}
@@ -595,6 +881,7 @@ export const App = () => {
             setSelectedCardId(null);
           }}
           onSelectRepoFolder={handleSelectRepoFolder}
+          onSwitchBranch={handleSwitchBranch}
           onSelectWorkspace={(workspaceId) => {
             setState((current) => ({ ...current, activeWorkspaceId: workspaceId }));
             setSelectedCardId(null);

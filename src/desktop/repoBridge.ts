@@ -15,6 +15,7 @@ export const repoBridge = {
     allowedEditableFolders: string;
     blockedFilePatterns: string;
     repoPath: string;
+    versionControlProvider: "auto" | "git" | "plastic";
   }): Promise<RepoInspection & { ok: boolean; message: string }> => {
     if (!window.kanbanAgent?.repo) {
       return {
@@ -22,8 +23,12 @@ export const repoBridge = {
         message: "Repo inspection is only available in the Electron desktop app.",
         repoPath: options.repoPath,
         scannedAt: new Date().toISOString(),
+        versionControlProvider: "none",
+        requestedVersionControlProvider: options.versionControlProvider,
         isGitRepo: false,
+        isPlasticWorkspace: false,
         currentBranch: "",
+        branches: [],
         dirty: false,
         changedFiles: [],
         fileTree: [],
@@ -32,6 +37,18 @@ export const repoBridge = {
     }
 
     return window.kanbanAgent.repo.inspect(options);
+  },
+
+  switchBranch: async (options: {
+    branch: string;
+    repoPath: string;
+    versionControlProvider: "git" | "plastic";
+  }): Promise<{ ok: boolean; output: string }> => {
+    if (!window.kanbanAgent?.repo) {
+      return { ok: false, output: "Branch switching is only available in the Electron desktop app." };
+    }
+
+    return window.kanbanAgent.repo.switchBranch(options);
   },
 
   readFile: async (options: {
@@ -80,12 +97,36 @@ export const repoBridge = {
     return window.kanbanAgent.repo.gitCommit(options);
   },
 
+  commitChanges: async (options: {
+    message: string;
+    repoPath: string;
+    versionControlProvider: "git" | "plastic";
+  }): Promise<{ ok: boolean; output: string }> => {
+    if (!window.kanbanAgent?.repo) {
+      return { ok: false, output: "Version control commit is only available in the Electron desktop app." };
+    }
+
+    return window.kanbanAgent.repo.commitChanges(options);
+  },
+
   gitCheckoutFiles: async (options: { files: string; repoPath: string }): Promise<{ ok: boolean; output: string }> => {
     if (!window.kanbanAgent?.repo) {
       return { ok: false, output: "Git rollback is only available in the Electron desktop app." };
     }
 
     return window.kanbanAgent.repo.gitCheckoutFiles(options);
+  },
+
+  rollbackFiles: async (options: {
+    files: string;
+    repoPath: string;
+    versionControlProvider: "git" | "plastic";
+  }): Promise<{ ok: boolean; output: string }> => {
+    if (!window.kanbanAgent?.repo) {
+      return { ok: false, output: "Version control rollback is only available in the Electron desktop app." };
+    }
+
+    return window.kanbanAgent.repo.rollbackFiles(options);
   },
 
   githubPr: async (

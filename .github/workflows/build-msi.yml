@@ -1,0 +1,52 @@
+name: Build Windows MSI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-msi:
+    name: Build MSI installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build MSI
+        run: npm run dist:win
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kanban-agent-msi
+          path: release/*.msi
+          if-no-files-found: error
+
+      - name: Attach MSI to GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          $releaseExists = gh release view $env:TAG_NAME 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:TAG_NAME --title $env:TAG_NAME --notes "Windows MSI build for kanban-agent $env:TAG_NAME"
+          }
+          gh release upload $env:TAG_NAME release/*.msi --clobber

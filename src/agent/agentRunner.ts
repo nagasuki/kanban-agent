@@ -1,6 +1,6 @@
 import { getModelProviderClient } from "./providers/providerRegistry";
 import { secureKeyStore } from "../desktop/secureKeyStore";
-import { buildAgentPrompt } from "../domain/promptBuilder";
+import { buildAgentPrompt, buildPlanDraftPrompt } from "../domain/promptBuilder";
 import type { KanbanCard, Workspace } from "../domain/types";
 
 export const runPlanOnly = async (
@@ -21,6 +21,29 @@ export const runPlanOnly = async (
   const agent = workspace.agentProfiles.find((profile) => profile.id === card.agentProfileId);
   const cliTool = workspace.cliToolProfiles.find((profile) => profile.id === card.cliToolProfileId);
   const prompt = buildAgentPrompt(card, workspace, model, skills, agent, cliTool);
+  const apiKeyResult = await secureKeyStore.get(secureKeyStore.keyForModel(model.id));
+  const apiKey = apiKeyResult.ok ? apiKeyResult.value : null;
+  return getModelProviderClient(model.provider).runPlanOnly({ apiKey, model, onStream, prompt });
+};
+
+export const runPlanDraft = async (
+  workspace: Workspace,
+  card: KanbanCard,
+  onStream?: (message: string) => void
+) => {
+  const model = workspace.modelProfiles.find((profile) => profile.id === card.modelProfileId);
+  if (!model) {
+    return {
+      summary: "Plan draft could not run because no model profile is selected.",
+      rawText: "Select a model profile before generating a plan.",
+      provider: "none"
+    };
+  }
+
+  const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
+  const agent = workspace.agentProfiles.find((profile) => profile.id === card.agentProfileId);
+  const cliTool = workspace.cliToolProfiles.find((profile) => profile.id === card.cliToolProfileId);
+  const prompt = buildPlanDraftPrompt(card, workspace, model, skills, agent, cliTool);
   const apiKeyResult = await secureKeyStore.get(secureKeyStore.keyForModel(model.id));
   const apiKey = apiKeyResult.ok ? apiKeyResult.value : null;
   return getModelProviderClient(model.provider).runPlanOnly({ apiKey, model, onStream, prompt });

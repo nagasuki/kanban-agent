@@ -1,5 +1,5 @@
 import { cliBridge } from "../desktop/cliBridge";
-import { buildAgentPrompt } from "../domain/promptBuilder";
+import { buildAgentPrompt, buildPlanDraftPrompt } from "../domain/promptBuilder";
 import type { CliToolProfile, KanbanCard, Workspace } from "../domain/types";
 
 export interface CliAgentResult {
@@ -47,5 +47,45 @@ export const runCliAgent = async (
       ? `${profile.name} completed with exit code ${result.exitCode}.`
       : `${profile.name} failed${result.timedOut ? " after timing out" : ""}.`,
     rawText: output || "CLI produced no output."
+  };
+};
+
+export const runCliPlanDraft = async (
+  workspace: Workspace,
+  card: KanbanCard,
+  profile: CliToolProfile
+): Promise<CliAgentResult> => {
+  const model = workspace.modelProfiles.find((item) => item.id === card.modelProfileId);
+  const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
+  const agent = workspace.agentProfiles.find((item) => item.id === card.agentProfileId);
+  const prompt = buildPlanDraftPrompt(card, workspace, model, skills, agent, profile);
+  const cwd = card.projectContext.repoPath || workspace.repoPath;
+  const cliPrompt = [
+    prompt.finalPromptPreview,
+    "",
+    "# CLI Runner Instructions",
+    "You are in Plan Mode for kanban-agent.",
+    "Do not edit files, run commands, apply patches, commit, or open pull requests.",
+    "Return only the markdown plan that should be saved into this card.",
+    "Make the plan specific enough for a later implementation session."
+  ].join("\n");
+
+  const result = await cliBridge.run({
+    args: profile.args,
+    command: profile.command,
+    cwd,
+    prompt: cliPrompt,
+    timeoutSeconds: profile.timeoutSeconds
+  });
+
+  const output = [result.stdout, result.stderr ? `stderr:\n${result.stderr}` : ""].filter(Boolean).join("\n\n");
+
+  return {
+    ok: result.ok,
+    provider: profile.name,
+    summary: result.ok
+      ? `${profile.name} generated a plan with exit code ${result.exitCode}.`
+      : `${profile.name} plan generation failed${result.timedOut ? " after timing out" : ""}.`,
+    rawText: output || "CLI produced no plan output."
   };
 };

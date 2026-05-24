@@ -446,7 +446,11 @@ export const CardDetailModal = ({
           />
         </label>
         <div className="repo-meta-row">
-          <span>{workspace.repoInspection?.isGitRepo ? `Branch ${workspace.repoInspection.currentBranch}` : "Git status unavailable"}</span>
+          <span>
+            {workspace.repoInspection?.versionControlProvider !== "none" && workspace.repoInspection?.currentBranch
+              ? `${workspace.repoInspection.versionControlProvider} ${workspace.repoInspection.currentBranch}`
+              : "Version control unavailable"}
+          </span>
           <span className={workspace.repoInspection?.dirty ? "warning-text" : "success-text"}>
             {workspace.repoInspection?.dirty ? "Dirty repo" : "No dirty repo warning"}
           </span>

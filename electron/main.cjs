@@ -181,25 +181,134 @@ const inspectGit = (repoPath) => {
   try {
     execFileSync("git", ["-C", repoPath, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" }).trim();
     const currentBranch = execFileSync("git", ["-C", repoPath, "branch", "--show-current"], { encoding: "utf8" }).trim();
+    const branches = execFileSync("git", ["-C", repoPath, "branch", "--format=%(refname:short)"], { encoding: "utf8" })
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
     const status = execFileSync("git", ["-C", repoPath, "status", "--short"], { encoding: "utf8" })
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean);
 
     return {
+      versionControlProvider: "git",
       isGitRepo: true,
+      isPlasticWorkspace: false,
       currentBranch: currentBranch || "(detached)",
+      branches,
       dirty: status.length > 0,
       changedFiles: status.map((line) => line.slice(3).trim())
     };
   } catch {
     return {
+      versionControlProvider: "none",
       isGitRepo: false,
+      isPlasticWorkspace: false,
       currentBranch: "",
+      branches: [],
       dirty: false,
       changedFiles: []
     };
   }
+};
+
+const runCommandSync = (command, args, cwd) => {
+  const env = commandEnvironment();
+  const executable = resolveExecutable(command, env);
+  if (!executable.found && process.platform === "win32") {
+    return {
+      ok: false,
+      stdout: "",
+      stderr: commandNotFoundMessage(command, executable.searched)
+    };
+  }
+
+  try {
+    const invocation = prepareCommandInvocation(executable.command, args);
+    const stdout = execFileSync(invocation.command, invocation.args, {
+      cwd,
+      encoding: "utf8",
+      env,
+      windowsHide: true
+    });
+    return { ok: true, stdout, stderr: "" };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: error.stdout?.toString?.() || "",
+      stderr: error.stderr?.toString?.() || error.message
+    };
+  }
+};
+
+const normalizePlasticBranch = (branch) => {
+  const clean = String(branch || "").trim();
+  if (!clean) return "";
+  if (clean.startsWith("br:")) return clean.slice(3);
+  return clean;
+};
+
+const parsePlasticCurrentBranch = (output) => {
+  const branchMatch =
+    output.match(/Branch:\s*(\/[^\r\n]+)/i) ||
+    output.match(/branch\s+['"]?(\/[^\s'"\r\n]+)/i) ||
+    output.match(/br:(\/[^\s'"\r\n]+)/i);
+  return branchMatch?.[1]?.trim() || "";
+};
+
+const inspectPlastic = (repoPath) => {
+  const status = runCommandSync("cm", ["status", repoPath, "--short"], repoPath);
+  if (!status.ok) {
+    return {
+      versionControlProvider: "none",
+      isGitRepo: false,
+      isPlasticWorkspace: false,
+      currentBranch: "",
+      branches: [],
+      dirty: false,
+      changedFiles: [],
+      warning: status.stderr || "Plastic SCM workspace was not detected."
+    };
+  }
+
+  const header = runCommandSync("cm", ["status", repoPath], repoPath);
+  const branchList = runCommandSync("cm", ["find", "branches", "--format={name}", "--nototal"], repoPath);
+  const currentBranch = parsePlasticCurrentBranch(header.stdout) || "/main";
+  const branches = (branchList.ok ? branchList.stdout : "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("Total:"));
+  const changedFiles = status.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return {
+    versionControlProvider: "plastic",
+    isGitRepo: false,
+    isPlasticWorkspace: true,
+    currentBranch,
+    branches: branches.length > 0 ? branches : [currentBranch],
+    dirty: changedFiles.length > 0,
+    changedFiles
+  };
+};
+
+const inspectVersionControl = (repoPath, requestedProvider) => {
+  if (requestedProvider === "git") {
+    return inspectGit(repoPath);
+  }
+
+  if (requestedProvider === "plastic") {
+    return inspectPlastic(repoPath);
+  }
+
+  const git = inspectGit(repoPath);
+  if (git.isGitRepo) {
+    return git;
+  }
+
+  return inspectPlastic(repoPath);
 };
 
 const registerRepoHandlers = () => {
@@ -218,14 +327,19 @@ const registerRepoHandlers = () => {
 
   ipcMain.handle("repo:inspect", async (_event, options) => {
     const repoPath = String(options.repoPath || "");
+    const requestedVersionControlProvider = String(options.versionControlProvider || "auto");
     if (!repoPath || !fs.existsSync(repoPath) || !fs.statSync(repoPath).isDirectory()) {
       return {
         ok: false,
         message: "Repo path is not a readable directory.",
         repoPath,
         scannedAt: new Date().toISOString(),
+        versionControlProvider: "none",
+        requestedVersionControlProvider,
         isGitRepo: false,
+        isPlasticWorkspace: false,
         currentBranch: "",
+        branches: [],
         dirty: false,
         changedFiles: [],
         fileTree: [],
@@ -236,9 +350,18 @@ const registerRepoHandlers = () => {
     const blockedPatterns = parseCsv(options.blockedFilePatterns);
     const allowedFolders = parseCsv(options.allowedEditableFolders);
     const tree = readFileTree(repoPath, blockedPatterns, allowedFolders);
-    const git = inspectGit(repoPath);
+    const versionControl = inspectVersionControl(repoPath, requestedVersionControlProvider);
     const warnings = [...tree.warnings];
-    if (git.dirty) {
+    if (versionControl.versionControlProvider === "none") {
+      warnings.push(
+        requestedVersionControlProvider === "plastic"
+          ? "Plastic workspace was not detected. Install Unity Version Control CLI (cm) or choose a Plastic workspace."
+          : requestedVersionControlProvider === "git"
+            ? "Git repository was not detected."
+            : "No Git repository or Plastic workspace was detected."
+      );
+    }
+    if (versionControl.dirty) {
       warnings.push("Repository has uncommitted changes.");
     }
 
@@ -247,9 +370,32 @@ const registerRepoHandlers = () => {
       message: "Repository inspected.",
       repoPath,
       scannedAt: new Date().toISOString(),
-      ...git,
+      requestedVersionControlProvider,
+      ...versionControl,
       fileTree: tree.fileTree,
       warnings
+    };
+  });
+
+  ipcMain.handle("repo:switch-branch", async (_event, options) => {
+    const repoPath = String(options.repoPath || "");
+    const provider = String(options.versionControlProvider || "");
+    const branch = String(options.branch || "").trim();
+    if (!repoPath || !fs.existsSync(repoPath) || !fs.statSync(repoPath).isDirectory()) {
+      return { ok: false, output: "Repo path is not readable." };
+    }
+    if (!branch) {
+      return { ok: false, output: "Branch is required." };
+    }
+
+    const result =
+      provider === "plastic"
+        ? await runCommand("cm", ["switch", `br:${normalizePlasticBranch(branch)}`, `--workspace=${repoPath}`, "--noinput"], repoPath, "", 120000)
+        : await runCommand("git", ["-C", repoPath, "checkout", branch], repoPath, "", 120000);
+
+    return {
+      ok: result.ok,
+      output: [result.stdout, result.stderr].filter(Boolean).join("\n") || (result.ok ? `Switched to ${branch}.` : "Branch switch failed.")
     };
   });
 
@@ -352,6 +498,27 @@ const registerRepoHandlers = () => {
     };
   });
 
+  ipcMain.handle("repo:commit-changes", async (_event, options) => {
+    const repoPath = String(options.repoPath || "");
+    const provider = String(options.versionControlProvider || "git");
+    const message = String(options.message || "").trim();
+    if (!message) {
+      return { ok: false, output: "Commit message is required." };
+    }
+
+    const result =
+      provider === "plastic"
+        ? await runCommand("cm", ["checkin", "-c", message, "--all"], repoPath, "", 120000)
+        : await runCommand("git", ["-C", repoPath, "add", "-A"], repoPath, "", 30000).then(async (add) =>
+            add.ok ? runCommand("git", ["-C", repoPath, "commit", "-m", message], repoPath, "", 30000) : add
+          );
+
+    return {
+      ok: result.ok,
+      output: [result.stdout, result.stderr].filter(Boolean).join("\n") || (result.ok ? "Changes committed." : "Commit failed.")
+    };
+  });
+
   ipcMain.handle("repo:git-checkout-files", async (_event, options) => {
     const repoPath = String(options.repoPath || "");
     const files = String(options.files || "")
@@ -364,6 +531,29 @@ const registerRepoHandlers = () => {
     }
 
     const result = await runCommand("git", ["-C", repoPath, "checkout", "--", ...files], repoPath, "", 30000);
+    return {
+      ok: result.ok,
+      output: [result.stdout, result.stderr].filter(Boolean).join("\n") || (result.ok ? "Files rolled back." : "Rollback failed.")
+    };
+  });
+
+  ipcMain.handle("repo:rollback-files", async (_event, options) => {
+    const repoPath = String(options.repoPath || "");
+    const provider = String(options.versionControlProvider || "git");
+    const files = String(options.files || "")
+      .split(",")
+      .map((file) => file.trim())
+      .filter(Boolean);
+
+    if (files.length === 0) {
+      return { ok: false, output: "No files configured for rollback." };
+    }
+
+    const result =
+      provider === "plastic"
+        ? await runCommand("cm", ["undo", ...files], repoPath, "", 30000)
+        : await runCommand("git", ["-C", repoPath, "checkout", "--", ...files], repoPath, "", 30000);
+
     return {
       ok: result.ok,
       output: [result.stdout, result.stderr].filter(Boolean).join("\n") || (result.ok ? "Files rolled back." : "Rollback failed.")
@@ -433,6 +623,21 @@ const uniqueExistingDirs = (dirs) => {
     });
 };
 
+const existingClaudeDirs = () => {
+  const root = process.env.USERPROFILE ? path.join(process.env.USERPROFILE, ".claude") : "";
+  if (!root || !fs.existsSync(root)) {
+    return [];
+  }
+
+  return uniqueExistingDirs([
+    root,
+    path.join(root, "bin"),
+    path.join(root, "local"),
+    path.join(root, "local", "bin"),
+    path.join(root, "local", "node_modules", ".bin")
+  ]);
+};
+
 const extraExecutableDirs = () =>
   uniqueExistingDirs([
     process.env.APPDATA ? path.join(process.env.APPDATA, "npm") : "",
@@ -441,7 +646,10 @@ const extraExecutableDirs = () =>
     process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "AppData", "Roaming", "npm") : "",
     process.env.USERPROFILE ? path.join(process.env.USERPROFILE, ".cargo", "bin") : "",
     process.env.USERPROFILE ? path.join(process.env.USERPROFILE, ".local", "bin") : "",
-    "C:\\Program Files\\nodejs"
+    ...existingClaudeDirs(),
+    "C:\\Program Files\\nodejs",
+    "C:\\Program Files\\PlasticSCM5\\client",
+    "C:\\Program Files\\Unity Version Control\\client"
   ]);
 
 const commandEnvironment = () => {
@@ -474,7 +682,15 @@ const executableCandidates = (command) => {
     return [clean];
   }
 
-  return [clean, `${clean}.cmd`, `${clean}.exe`, `${clean}.bat`];
+  return [clean, `${clean}.cmd`, `${clean}.exe`, `${clean}.bat`, `${clean}.ps1`];
+};
+
+const isRunnableFile = (candidate) => {
+  try {
+    return fs.existsSync(candidate) && fs.statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
 };
 
 const resolveExecutable = (command, env) => {
@@ -484,7 +700,7 @@ const resolveExecutable = (command, env) => {
 
   if (commandHasPath(clean)) {
     const resolvedCandidates = executableCandidates(clean);
-    const found = resolvedCandidates.find((candidate) => fs.existsSync(candidate));
+    const found = resolvedCandidates.find((candidate) => isRunnableFile(candidate));
     return {
       command: found || clean,
       found: Boolean(found),
@@ -497,7 +713,7 @@ const resolveExecutable = (command, env) => {
     for (const candidate of executableCandidates(clean)) {
       const absoluteCandidate = path.join(dir, candidate);
       searched.push(absoluteCandidate);
-      if (fs.existsSync(absoluteCandidate)) {
+      if (isRunnableFile(absoluteCandidate)) {
         return {
           command: absoluteCandidate,
           found: true,
@@ -514,7 +730,22 @@ const resolveExecutable = (command, env) => {
   };
 };
 
-const shouldUseShell = (command) => process.platform === "win32" && [".cmd", ".bat"].includes(path.extname(command).toLowerCase());
+const prepareCommandInvocation = (command, args) => {
+  const extension = path.extname(command).toLowerCase();
+  if (process.platform === "win32" && extension === ".ps1") {
+    return {
+      command: "powershell.exe",
+      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", command, ...args],
+      shell: false
+    };
+  }
+
+  return {
+    command,
+    args,
+    shell: process.platform === "win32" && [".cmd", ".bat"].includes(extension)
+  };
+};
 
 const commandNotFoundMessage = (command, searched) => {
   const searchedPreview = searched.slice(0, 8).join("\n");
@@ -523,6 +754,7 @@ const commandNotFoundMessage = (command, searched) => {
     `Could not find CLI command "${command}".`,
     "Install the CLI or set Settings > CLI Agents > Command to the full executable path.",
     "On Windows npm global CLIs are often under %APPDATA%\\npm, for example C:\\Users\\<you>\\AppData\\Roaming\\npm\\claude.cmd.",
+    "Claude config folders such as C:\\Users\\<you>\\.claude are searched too, but the Command must resolve to a real executable file.",
     searchedPreview ? `Searched:\n${searchedPreview}${more}` : ""
   ]
     .filter(Boolean)
@@ -544,9 +776,10 @@ const runCommand = (command, args, cwd, stdin, timeoutMs) =>
       return;
     }
 
-    const child = spawn(executable.command, args, {
+    const invocation = prepareCommandInvocation(executable.command, args);
+    const child = spawn(invocation.command, invocation.args, {
       cwd,
-      shell: shouldUseShell(executable.command),
+      shell: invocation.shell,
       windowsHide: true,
       env
     });
@@ -647,9 +880,10 @@ const registerCliHandlers = () => {
         return;
       }
 
-      const child = spawn(executable.command, splitArgs(options.args), {
+      const invocation = prepareCommandInvocation(executable.command, splitArgs(options.args));
+      const child = spawn(invocation.command, invocation.args, {
         cwd,
-        shell: shouldUseShell(executable.command),
+        shell: invocation.shell,
         windowsHide: true,
         env
       });
@@ -699,6 +933,7 @@ const registerCliHandlers = () => {
 };
 
 const createWindow = () => {
+  const appIcon = path.join(__dirname, "../build/icon.ico");
   const win = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -706,6 +941,7 @@ const createWindow = () => {
     minHeight: 720,
     title: "kanban-agent",
     backgroundColor: "#0b0f14",
+    icon: appIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

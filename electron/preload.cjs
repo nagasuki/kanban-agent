@@ -11,11 +11,14 @@ contextBridge.exposeInMainWorld("kanbanAgent", {
   repo: {
     selectFolder: () => ipcRenderer.invoke("repo:select-folder"),
     inspect: (options) => ipcRenderer.invoke("repo:inspect", options),
+    switchBranch: (options) => ipcRenderer.invoke("repo:switch-branch", options),
     readFile: (options) => ipcRenderer.invoke("repo:read-file", options),
     applyPatch: (options) => ipcRenderer.invoke("repo:apply-patch", options),
     runCommand: (options) => ipcRenderer.invoke("repo:run-command", options),
     gitCommit: (options) => ipcRenderer.invoke("repo:git-commit", options),
+    commitChanges: (options) => ipcRenderer.invoke("repo:commit-changes", options),
     gitCheckoutFiles: (options) => ipcRenderer.invoke("repo:git-checkout-files", options),
+    rollbackFiles: (options) => ipcRenderer.invoke("repo:rollback-files", options),
     githubPr: (options) => ipcRenderer.invoke("repo:github-pr", options)
   },
   cli: {

@@ -5,11 +5,24 @@ import type { KanbanCard, Workspace } from "../../domain/types";
 interface KanbanCardItemProps {
   card: KanbanCard;
   workspace: Workspace;
+  isDragging: boolean;
   isSelected: boolean;
+  onDragEnd: () => void;
+  onDragOverCard: (cardId: string, position: "before" | "after") => void;
+  onDragStart: (cardId: string) => void;
   onSelect: () => void;
 }
 
-export const KanbanCardItem = ({ card, workspace, isSelected, onSelect }: KanbanCardItemProps) => {
+export const KanbanCardItem = ({
+  card,
+  workspace,
+  isDragging,
+  isSelected,
+  onDragEnd,
+  onDragOverCard,
+  onDragStart,
+  onSelect
+}: KanbanCardItemProps) => {
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
   const model = workspace.modelProfiles.find((profile) => profile.id === card.modelProfileId);
   const cliTool = workspace.cliToolProfiles.find((profile) => profile.id === (card.cliToolProfileId || workspace.defaultCliToolProfileId));
@@ -20,7 +33,7 @@ export const KanbanCardItem = ({ card, workspace, isSelected, onSelect }: Kanban
   return (
     <article
       aria-label={`Open card detail for ${card.title}`}
-      className={`kanban-card ${isSelected ? "selected" : ""}`}
+      className={`kanban-card ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
       draggable
       role="button"
       tabIndex={0}
@@ -28,6 +41,14 @@ export const KanbanCardItem = ({ card, workspace, isSelected, onSelect }: Kanban
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", card.id);
+        onDragStart(card.id);
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => {
+        event.preventDefault();
+        const rect = event.currentTarget.getBoundingClientRect();
+        const position = event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+        onDragOverCard(card.id, position);
       }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {

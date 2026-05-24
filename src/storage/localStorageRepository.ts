@@ -44,6 +44,7 @@ const normalizeAppState = (state: AppState): AppState => ({
     return {
       ...workspace,
       repoPath: workspace.repoPath ?? "",
+      versionControlProvider: workspace.versionControlProvider ?? "auto",
       defaultBranch: workspace.defaultBranch ?? "main",
       defaultModelProfileId: workspace.defaultModelProfileId ?? workspace.modelProfiles[0]?.id ?? "",
       defaultCliToolProfileId: workspace.defaultCliToolProfileId || cliToolProfiles[0]?.id || "",
@@ -51,7 +52,15 @@ const normalizeAppState = (state: AppState): AppState => ({
       blockedFilePatterns: workspace.blockedFilePatterns ?? ".env, *.pem, *.key",
       testCommand: workspace.testCommand ?? "",
       buildCommand: workspace.buildCommand ?? "",
-      repoInspection: workspace.repoInspection,
+      repoInspection: workspace.repoInspection
+        ? {
+            ...workspace.repoInspection,
+            versionControlProvider: workspace.repoInspection.versionControlProvider ?? (workspace.repoInspection.isGitRepo ? "git" : "none"),
+            requestedVersionControlProvider: workspace.repoInspection.requestedVersionControlProvider ?? workspace.versionControlProvider ?? "auto",
+            isPlasticWorkspace: workspace.repoInspection.isPlasticWorkspace ?? false,
+            branches: workspace.repoInspection.branches ?? []
+          }
+        : undefined,
       skills: workspace.skills.map((skill) => ({
         ...skill,
         version: skill.version ?? "0.1.0"
@@ -217,6 +226,14 @@ const createLegacySessions = (card: KanbanCard): ImplementationSession[] => {
 };
 
 const normalizeCliToolProfile = (profile: CliToolProfile): CliToolProfile => {
+  if (profile.provider === "Claude Code" && profile.command === "claude" && window.kanbanAgent?.platform === "win32") {
+    return {
+      ...profile,
+      command: "claude.ps1",
+      args: profile.args.trim() || "-p"
+    };
+  }
+
   if (profile.provider === "Claude Code" && profile.command === "claude" && !profile.args.trim()) {
     return {
       ...profile,

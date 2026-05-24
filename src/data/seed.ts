@@ -142,6 +142,7 @@ export const createSeedState = (): AppState => {
     id: workspaceId,
     name: "kanban-agent",
     repoPath: "D:\\kanban-agent",
+    versionControlProvider: "auto",
     defaultBranch: "main",
     defaultModelProfileId: models[0].id,
     defaultAgentProfileId: agentProfileId,
