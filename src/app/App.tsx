@@ -515,6 +515,20 @@ export const App = () => {
     }));
   };
 
+  const handleStartCard = (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+
+    if (card.runnerType === "cli") {
+      void handleRunCliAgent(cardId);
+      return;
+    }
+
+    void handleRunPlanOnly(cardId);
+  };
+
   const runImplementationFromWorkspace = async (workspace: Workspace, cardId: string): Promise<Workspace> => {
     const card = workspace.cards.find((item) => item.id === cardId);
     if (!card) {
@@ -804,10 +818,15 @@ export const App = () => {
           filterStatus={filterStatus}
           searchQuery={searchQuery}
           selectedCardId={selectedCardId}
+          onCancelCard={(cardId) => updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId))}
           onSelectCard={setSelectedCardId}
           onCreateCard={handleCreateCard}
           onMoveCard={handleMoveCard}
           onReorderCard={handleReorderCard}
+          onReviewAction={(cardId, action) =>
+            updateActiveWorkspace((workspace) => applyReviewAction(workspace, cardId, action))
+          }
+          onStartCard={handleStartCard}
           onStartImplementAll={handleStartImplementAll}
         />
         </main>

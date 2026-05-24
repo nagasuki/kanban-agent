@@ -967,6 +967,101 @@ label {
   line-height: 1.55;
 }
 
+.card-summary {
+  color: var(--muted);
+}
+
+.compact-card-note {
+  min-height: auto;
+  color: var(--warning);
+}
+
+.cli-status-card,
+.diff-mini-preview {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.cli-status-card {
+  color: var(--muted-2);
+}
+
+.cli-status-card span:first-child {
+  color: var(--text-soft);
+  font-weight: 800;
+}
+
+.cli-status-card span,
+.diff-mini-preview span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-card-meta,
+.done-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.diff-add {
+  color: var(--success);
+}
+
+.diff-remove {
+  color: var(--danger);
+}
+
+.diff-context {
+  color: var(--muted-2);
+}
+
+.card-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.card-inline-actions button {
+  min-height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--panel-4);
+  color: var(--text-soft);
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.card-inline-actions button:hover {
+  border-color: var(--border-hover);
+  background: var(--panel-2);
+}
+
+.review-card-actions button:first-child {
+  color: var(--success);
+}
+
+.review-card-actions button:last-child {
+  color: var(--danger);
+}
+
 .compact-board .kanban-card {
   gap: 7px;
   padding: 9px;

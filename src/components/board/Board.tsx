@@ -13,10 +13,13 @@ interface BoardProps {
   filterStatus: string;
   searchQuery: string;
   selectedCardId: string | null;
+  onCancelCard: (cardId: string) => void;
   onSelectCard: (cardId: string) => void;
   onCreateCard: (columnId: BoardColumnId) => void;
   onMoveCard: (cardId: string, targetColumnId: BoardColumnId) => void;
   onReorderCard: (cardId: string, targetColumnId: BoardColumnId, targetIndex: number) => void;
+  onReviewAction: (cardId: string, action: "approve" | "request-changes") => void;
+  onStartCard: (cardId: string) => void;
   onStartImplementAll: () => void;
 }
 
@@ -28,10 +31,13 @@ export const Board = ({
   filterStatus,
   searchQuery,
   selectedCardId,
+  onCancelCard,
   onSelectCard,
   onCreateCard,
   onMoveCard,
   onReorderCard,
+  onReviewAction,
+  onStartCard,
   onStartImplementAll
 }: BoardProps) => {
   const [draggingCardId, setDraggingCardId] = useState<string | null>(null);
@@ -76,15 +82,15 @@ export const Board = ({
       className={`board ${compact ? "compact-board" : ""}`}
       aria-label="Kanban board"
       onDragEnd={() => {
-      setDraggingCardId(null);
-      setDragOverColumnId(null);
-      setDropTarget(null);
+        setDraggingCardId(null);
+        setDragOverColumnId(null);
+        setDropTarget(null);
       }}
       onDrop={() => {
         setDraggingCardId(null);
-      setDragOverColumnId(null);
-      setDropTarget(null);
-    }}
+        setDragOverColumnId(null);
+        setDropTarget(null);
+      }}
     >
       {BOARD_COLUMNS.map((column) => {
         const cards = visibleCards.filter((card) => card.columnId === column.id);
@@ -147,7 +153,7 @@ export const Board = ({
 
             <div className="card-list">
               {dragOverColumnId === column.id && draggingCardId ? <div className="drop-preview">Drop here</div> : null}
-              {cards.map((card) => (
+              {cards.map((card, index) => (
                 <div
                   className={`card-drop-frame ${
                     dropTarget?.cardId === card.id && draggingCardId !== card.id ? `drop-${dropTarget.position}` : ""
@@ -156,9 +162,11 @@ export const Board = ({
                 >
                   <KanbanCardItem
                     card={card}
+                    columnIndex={index}
                     isDragging={draggingCardId === card.id}
                     isSelected={selectedCardId === card.id}
                     workspace={workspace}
+                    onCancelCard={onCancelCard}
                     onDragOverCard={(cardId, position) => setDropTarget({ cardId, position })}
                     onDragStart={setDraggingCardId}
                     onDragEnd={() => {
@@ -166,7 +174,9 @@ export const Board = ({
                       setDragOverColumnId(null);
                       setDropTarget(null);
                     }}
+                    onReviewAction={onReviewAction}
                     onSelect={() => onSelectCard(card.id)}
+                    onStartCard={onStartCard}
                   />
                 </div>
               ))}
