@@ -631,11 +631,11 @@ export const CardDetailModal = ({
           Patch text
           <textarea
             rows={6}
-            value={latestSession?.diffText || card.patchText || card.diffPlaceholder}
+            value={card.patchText || latestSession?.diffText || card.diffPlaceholder}
             onChange={(event) => onUpdateCard(card.id, { patchText: event.target.value })}
           />
         </label>
-        <DiffViewer value={latestSession?.diffText || card.patchText || card.diffPlaceholder} />
+        <DiffViewer value={card.patchText || latestSession?.diffText || card.diffPlaceholder} />
         <div className="review-actions">
           <button type="button" onClick={() => onRunWorkspaceCommand(card.id, "test")}>
             <Play size={15} />

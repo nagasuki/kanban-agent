@@ -908,6 +908,9 @@ const registerRepoHandlers = () => {
 const extractPatchFiles = (patchText) => {
   const files = new Set();
   for (const line of patchText.split(/\r?\n/)) {
+    if (line.startsWith("Index: ")) {
+      cleanPatchPath(line.slice("Index: ".length))?.forEach((file) => files.add(file));
+    }
     if (line.startsWith("diff --git ")) {
       const parts = line.trim().split(/\s+/);
       cleanPatchPath(parts[3] || parts[2])?.forEach((file) => files.add(file));
@@ -939,7 +942,7 @@ const cleanPatchPath = (value) => {
 };
 
 const looksLikeUnifiedPatch = (patchText) =>
-  /(^|\n)(diff --git |--- |\+\+\+ )/.test(patchText) && /(^|\n)@@ /.test(patchText);
+  /(^|\n)(diff --git |Index: |--- )/.test(patchText) && /(^|\n)\+\+\+ /.test(patchText) && /(^|\n)@@ /.test(patchText);
 
 const writeTempPatchFile = (patchText) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kanban-agent-patch-"));

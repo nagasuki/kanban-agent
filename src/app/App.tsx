@@ -828,7 +828,8 @@ export const App = () => {
       return;
     }
 
-    const patchText = extractPatchForApply(card.patchText || card.diffPlaceholder);
+    const latestSession = card.sessions.find((session) => session.id === card.activeSessionId) ?? card.sessions.at(-1);
+    const patchText = extractPatchForApply([card.patchText, latestSession?.diffText, card.diffPlaceholder]);
     if (!patchText.trim()) {
       setWarning("No valid patch was found on this card. Ask the agent to generate a unified diff, or paste one into the Diff/Patch field.");
       return;
@@ -1109,15 +1110,27 @@ export const App = () => {
   );
 };
 
-const extractPatchForApply = (value: string): string => {
-  const text = value.trim();
-  if (!text) {
-    return "";
+const extractPatchForApply = (values: Array<string | undefined>): string => {
+  for (const value of values) {
+    const text = value?.trim();
+    if (!text) {
+      continue;
+    }
+
+    const fencedBlocks = [...text.matchAll(/```(?:diff|patch)?\s*([\s\S]*?)```/gi)].map((match) => match[1]?.trim() ?? "");
+    for (const candidate of [...fencedBlocks, text]) {
+      const patch = extractPatchCandidate(candidate);
+      if (patch) {
+        return patch;
+      }
+    }
   }
 
-  const fencedDiff = text.match(/```(?:diff|patch)?\s*([\s\S]*?)```/i);
-  const candidate = fencedDiff?.[1]?.trim() || text;
-  const lines = candidate.split(/\r?\n/);
+  return "";
+};
+
+const extractPatchCandidate = (value: string): string => {
+  const lines = value.split(/\r?\n/);
   const firstPatchLine = lines.findIndex((line) =>
     line.startsWith("diff --git ") ||
     line.startsWith("--- ") ||
@@ -1129,5 +1142,7 @@ const extractPatchForApply = (value: string): string => {
   }
 
   const patch = lines.slice(firstPatchLine).join("\n").trim();
-  return /(?:^|\n)(diff --git |--- |\+\+\+ |@@ )/.test(patch) ? `${patch}\n` : "";
+  const hasFileHeader = /(?:^|\n)(diff --git |Index: |--- )/.test(patch) && /(?:^|\n)\+\+\+ /.test(patch);
+  const hasHunk = /(?:^|\n)@@ /.test(patch);
+  return hasFileHeader && hasHunk ? `${patch}\n` : "";
 };
