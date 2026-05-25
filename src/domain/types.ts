@@ -190,9 +190,14 @@ export interface CliToolProfile {
   id: string;
   name: string;
   provider: CliToolProvider;
+  providerId?: string;
+  displayName?: string;
   command: string;
   args: string;
   timeoutSeconds: number;
+  environmentVariables?: string;
+  workingDirectory?: string;
+  resolvedExecutablePath?: string;
   createdAt: string;
   updatedAt: string;
 }

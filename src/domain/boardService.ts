@@ -549,9 +549,13 @@ export const startCliExecution = (
 export const completeCliExecution = (
   workspace: Workspace,
   cardId: string,
-  result: { ok: boolean; provider: string; summary: string; rawText: string }
+  result: { ok: boolean; provider: string; summary: string; rawText: string; executionLogs?: string[]; resolvedExecutablePath?: string }
 ): Workspace => {
   const timestamp = nowIso();
+  const executionLogs = (result.executionLogs ?? [])
+    .filter(Boolean)
+    .slice(-30)
+    .map((message) => createLogEntry(message));
   return {
     ...workspace,
     cards: workspace.cards.map((card) =>
@@ -570,6 +574,7 @@ export const completeCliExecution = (
               currentStep: "Waiting for review",
               completedAt: timestamp,
               extraLogs: [
+                ...executionLogs,
                 createLogEntry(
                   `CLI agent ${result.provider} finished${result.ok ? "" : " with errors"}`,
                   result.ok ? "success" : "warning"
@@ -584,6 +589,7 @@ export const completeCliExecution = (
             },
             activityLog: [
               ...card.activityLog,
+              ...executionLogs,
               createLogEntry(
                 `CLI agent ${result.provider} finished${result.ok ? "" : " with errors"}`,
                 result.ok ? "success" : "warning"

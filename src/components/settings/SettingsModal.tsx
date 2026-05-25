@@ -1,5 +1,6 @@
 import { Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { useState } from "react";
+import type { CliValidationResult } from "../../desktop/cliBridge";
 import type { ThemeMode } from "../../app/theme";
 import type { AgentProfile, AppState, CliToolProfile, ModelProfile, SkillPreset, Workspace } from "../../domain/types";
 import { AgentEditor } from "../agents/AgentEditor";
@@ -28,6 +29,7 @@ interface SettingsModalProps {
   onSelectRepoFolder: () => void;
   onSelectWorkspace: (workspaceId: string) => void;
   onSwitchBranch: (branch: string) => void;
+  onTestCliTool: (profile: CliToolProfile) => Promise<CliValidationResult>;
   onThemeChange: (mode: ThemeMode) => void;
   onUpdateAgent: (agentId: string, updates: Partial<AgentProfile>) => void;
   onUpdateCliTool: (profileId: string, updates: Partial<CliToolProfile>) => void;
@@ -358,7 +360,7 @@ const ModelSettings = ({ activeWorkspace, onCreateModel, onDeleteModel, onUpdate
   </>
 );
 
-const CliSettings = ({ activeWorkspace, onCreateCliTool, onDeleteCliTool, onUpdateCliTool }: SettingsModalProps) => (
+const CliSettings = ({ activeWorkspace, onCreateCliTool, onDeleteCliTool, onTestCliTool, onUpdateCliTool }: SettingsModalProps) => (
   <>
     <PanelHeader eyebrow="CLI Agents" title="Claude Code / Codex CLI" description="Manage local CLI tools used by task cards." />
     <button className="empty-action settings-inline-action" type="button" onClick={onCreateCliTool}>
@@ -371,6 +373,7 @@ const CliSettings = ({ activeWorkspace, onCreateCliTool, onDeleteCliTool, onUpda
           key={profile.id}
           profile={profile}
           onUpdate={(updates) => onUpdateCliTool(profile.id, updates)}
+          onTest={() => onTestCliTool(profile)}
           onDelete={() => onDeleteCliTool(profile.id)}
         />
       ))}

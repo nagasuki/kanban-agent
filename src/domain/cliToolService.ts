@@ -7,9 +7,14 @@ export const createCliToolProfile = (workspace: Workspace): Workspace => {
     id: createId("cli"),
     name: "Custom CLI Agent",
     provider: "Custom CLI",
+    providerId: "custom-cli",
+    displayName: "Custom CLI Agent",
     command: "agent",
     args: "",
     timeoutSeconds: 300,
+    environmentVariables: "",
+    workingDirectory: "",
+    resolvedExecutablePath: "",
     createdAt: timestamp,
     updatedAt: timestamp
   };

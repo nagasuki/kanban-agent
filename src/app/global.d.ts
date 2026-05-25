@@ -70,7 +70,10 @@ declare global {
             args: string;
             command: string;
             cwd: string;
+            environmentVariables?: string;
             prompt: string;
+            resolvedExecutablePath?: string;
+            runId?: string;
             timeoutSeconds: number;
           }
         ) => Promise<{
@@ -79,7 +82,34 @@ declare global {
           stdout: string;
           stderr: string;
           timedOut: boolean;
+          cancelled?: boolean;
+          resolvedExecutablePath?: string;
+          logs?: Array<{ stream: "system" | "stdout" | "stderr"; chunk: string; timestamp: string }>;
         }>;
+        cancel?: (options: { runId: string }) => Promise<{ ok: boolean; message: string }>;
+        test?: (
+          options: {
+            args: string;
+            command: string;
+            cwd: string;
+            environmentVariables?: string;
+            resolvedExecutablePath?: string;
+            timeoutSeconds: number;
+          }
+        ) => Promise<{
+          ok: boolean;
+          message: string;
+          resolvedExecutablePath: string;
+          version: string;
+          stdout: string;
+          stderr: string;
+          exitCode: number | null;
+          timedOut?: boolean;
+          logs?: Array<{ stream: "system" | "stdout" | "stderr"; chunk: string; timestamp: string }>;
+        }>;
+        onOutput?: (
+          callback: (payload: { runId: string; stream: "stdout" | "stderr"; chunk: string; timestamp: string }) => void
+        ) => () => void;
       };
     };
   }

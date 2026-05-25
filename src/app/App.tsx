@@ -6,6 +6,7 @@ import { SettingsModal } from "../components/settings/SettingsModal";
 import { TopNav } from "../components/topnav/TopNav";
 import { runPlanDraft, runPlanOnly } from "../agent/agentRunner";
 import { runCliAgent, runCliPlanDraft } from "../agent/cliRunner";
+import { cliBridge, type CliValidationResult } from "../desktop/cliBridge";
 import { repoBridge } from "../desktop/repoBridge";
 import { createAgentProfile, deleteAgentProfile, updateAgentProfile } from "../domain/agentService";
 import { createCliToolProfile, deleteCliToolProfile, updateCliToolProfile } from "../domain/cliToolService";
@@ -35,7 +36,7 @@ import {
 import { createId, nowIso } from "../domain/id";
 import { createModelProfile, deleteModelProfile, updateModelProfile } from "../domain/modelService";
 import { createSkill, deleteSkill, duplicateSkill, updateSkill } from "../domain/skillService";
-import type { AppState, BoardColumnId, KanbanCard, SessionRetryMode, Workspace } from "../domain/types";
+import type { AppState, BoardColumnId, CliToolProfile, KanbanCard, SessionRetryMode, Workspace } from "../domain/types";
 import { loadAppState, resetAppState, saveAppState } from "../storage/localStorageRepository";
 import { loadThemeMode, resolveThemeMode, saveThemeMode, type ThemeMode } from "./theme";
 
@@ -242,7 +243,14 @@ export const App = () => {
     const result =
       draftCard.runnerType === "cli"
         ? cliProfile
-          ? await runCliPlanDraft(created.workspace, draftCard, cliProfile).catch((error: unknown) => ({
+          ? await runCliPlanDraft(created.workspace, draftCard, cliProfile, (message) => {
+              setState((current) => ({
+                ...current,
+                workspaces: current.workspaces.map((workspace) =>
+                  workspace.id === current.activeWorkspaceId ? appendCardLog(workspace, draftCard.id, message) : workspace
+                )
+              }));
+            }).catch((error: unknown) => ({
               ok: false,
               provider: "CLI",
               summary: "CLI plan generation failed.",
@@ -500,7 +508,14 @@ export const App = () => {
       )
     }));
 
-    const result = await runCliAgent(activeWorkspace, card, profile).catch((error: unknown) => ({
+    const result = await runCliAgent(started.workspace, card, profile, (message) => {
+      setState((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((workspace) =>
+          workspace.id === current.activeWorkspaceId ? appendCardLog(workspace, cardId, message) : workspace
+        )
+      }));
+    }).catch((error: unknown) => ({
       ok: false,
       provider: profile.name,
       summary: "CLI agent execution failed.",
@@ -510,7 +525,15 @@ export const App = () => {
     setState((current) => ({
       ...current,
       workspaces: current.workspaces.map((workspace) =>
-        workspace.id === current.activeWorkspaceId ? completeCliExecution(workspace, cardId, result) : workspace
+        workspace.id === current.activeWorkspaceId
+          ? workspace.cards.find((item) => item.id === cardId)?.columnId === "in-process"
+            ? result.resolvedExecutablePath
+              ? updateCliToolProfile(completeCliExecution(workspace, cardId, result), profile.id, {
+                  resolvedExecutablePath: result.resolvedExecutablePath
+                })
+              : completeCliExecution(workspace, cardId, result)
+            : workspace
+          : workspace
       )
     }));
   };
@@ -588,14 +611,51 @@ export const App = () => {
       )
     }));
 
-    const result = await runCliAgent(started.workspace, card, profile).catch((error: unknown) => ({
+    const result = await runCliAgent(started.workspace, card, profile, (message) => {
+      setState((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((item) =>
+          item.id === current.activeWorkspaceId ? appendCardLog(item, cardId, message) : item
+        )
+      }));
+    }).catch((error: unknown) => ({
       ok: false,
       provider: profile.name,
       summary: "CLI agent execution failed.",
       rawText: error instanceof Error ? error.message : "Unknown CLI execution error."
     }));
 
-    return completeCliExecution(started.workspace, cardId, result);
+    return started.workspace.cards.find((item) => item.id === cardId)?.columnId === "in-process"
+      ? result.resolvedExecutablePath
+        ? updateCliToolProfile(completeCliExecution(started.workspace, cardId, result), profile.id, {
+            resolvedExecutablePath: result.resolvedExecutablePath
+          })
+        : completeCliExecution(started.workspace, cardId, result)
+      : started.workspace;
+  };
+
+  const handleCancelExecution = async (cardId: string) => {
+    await cliBridge.cancel(cardId);
+    updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId));
+  };
+
+  const handleTestCliTool = async (profile: CliToolProfile): Promise<CliValidationResult> => {
+    const result = await cliBridge.test({
+      args: profile.args,
+      command: profile.command,
+      cwd: profile.workingDirectory || activeWorkspace.repoPath || "",
+      environmentVariables: profile.environmentVariables,
+      resolvedExecutablePath: profile.resolvedExecutablePath,
+      timeoutSeconds: Math.min(profile.timeoutSeconds, 120)
+    });
+
+    setWarning(result.ok ? result.message : result.stderr || result.message);
+    if (result.ok && result.resolvedExecutablePath) {
+      updateActiveWorkspace((workspace) =>
+        updateCliToolProfile(workspace, profile.id, { resolvedExecutablePath: result.resolvedExecutablePath })
+      );
+    }
+    return result;
   };
 
   const handleStartImplementAll = async () => {
@@ -818,7 +878,7 @@ export const App = () => {
           filterStatus={filterStatus}
           searchQuery={searchQuery}
           selectedCardId={selectedCardId}
-          onCancelCard={(cardId) => updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId))}
+          onCancelCard={handleCancelExecution}
           onSelectCard={setSelectedCardId}
           onCreateCard={handleCreateCard}
           onMoveCard={handleMoveCard}
@@ -852,7 +912,7 @@ export const App = () => {
             return result.workspace;
           })
         }
-        onCancelExecution={(cardId) => updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId))}
+        onCancelExecution={handleCancelExecution}
         onRunPlanOnly={handleRunPlanOnly}
         onLoadAttachedFiles={handleLoadAttachedFiles}
         onRunCliAgent={handleRunCliAgent}
@@ -906,6 +966,7 @@ export const App = () => {
             setSelectedCardId(null);
           }}
           onThemeChange={setThemeMode}
+          onTestCliTool={handleTestCliTool}
           onUpdateAgent={(agentId, updates) =>
             updateActiveWorkspace((workspace) => updateAgentProfile(workspace, agentId, updates))
           }

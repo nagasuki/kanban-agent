@@ -226,27 +226,78 @@ const createLegacySessions = (card: KanbanCard): ImplementationSession[] => {
 };
 
 const normalizeCliToolProfile = (profile: CliToolProfile): CliToolProfile => {
-  if (profile.provider === "Claude Code" && profile.command === "claude" && window.kanbanAgent?.platform === "win32") {
+  const isWindows = typeof window === "undefined" || window.kanbanAgent?.platform === "win32";
+  const shellCommand = isWindows ? "cmd" : "sh";
+  const claudeArgs = isWindows ? "/c claude -p" : "-c \"claude -p\"";
+  const codexArgs = isWindows ? "/c codex exec -" : "-c \"codex exec -\"";
+
+  if (
+    profile.provider === "Claude Code" &&
+    ["claude", "claude.ps1", "claude.cmd"].includes(profile.command.trim().toLowerCase())
+  ) {
     return {
       ...profile,
-      command: "claude.ps1",
-      args: profile.args.trim() || "-p"
+      providerId: profile.providerId ?? "claude-code",
+      displayName: profile.displayName ?? profile.name,
+      command: shellCommand,
+      args: profile.args.trim()
+        ? isWindows
+          ? `/c claude ${profile.args.trim()}`
+          : `-c "claude ${profile.args.trim()}"`
+        : claudeArgs,
+      environmentVariables: profile.environmentVariables ?? "",
+      workingDirectory: profile.workingDirectory ?? "",
+      resolvedExecutablePath: profile.resolvedExecutablePath ?? ""
     };
   }
 
-  if (profile.provider === "Claude Code" && profile.command === "claude" && !profile.args.trim()) {
+  if (profile.provider === "Claude Code" && !profile.args.trim()) {
     return {
       ...profile,
-      args: "-p"
+      providerId: profile.providerId ?? "claude-code",
+      displayName: profile.displayName ?? profile.name,
+      args: profile.command.trim().toLowerCase() === shellCommand ? claudeArgs : "-p",
+      environmentVariables: profile.environmentVariables ?? "",
+      workingDirectory: profile.workingDirectory ?? "",
+      resolvedExecutablePath: profile.resolvedExecutablePath ?? ""
     };
   }
 
-  if (profile.provider === "Codex" && profile.command === "codex" && !profile.args.trim()) {
+  if (profile.provider === "Codex" && ["codex", "codex.ps1", "codex.cmd"].includes(profile.command.trim().toLowerCase())) {
     return {
       ...profile,
-      args: "exec -"
+      providerId: profile.providerId ?? "codex-cli",
+      displayName: profile.displayName ?? profile.name,
+      command: shellCommand,
+      args: profile.args.trim()
+        ? isWindows
+          ? `/c codex ${profile.args.trim()}`
+          : `-c "codex ${profile.args.trim()}"`
+        : codexArgs,
+      environmentVariables: profile.environmentVariables ?? "",
+      workingDirectory: profile.workingDirectory ?? "",
+      resolvedExecutablePath: profile.resolvedExecutablePath ?? ""
     };
   }
 
-  return profile;
+  if (profile.provider === "Codex" && !profile.args.trim()) {
+    return {
+      ...profile,
+      providerId: profile.providerId ?? "codex-cli",
+      displayName: profile.displayName ?? profile.name,
+      args: profile.command.trim().toLowerCase() === shellCommand ? codexArgs : "exec -",
+      environmentVariables: profile.environmentVariables ?? "",
+      workingDirectory: profile.workingDirectory ?? "",
+      resolvedExecutablePath: profile.resolvedExecutablePath ?? ""
+    };
+  }
+
+  return {
+    ...profile,
+    providerId: profile.providerId ?? profile.provider.toLowerCase().replaceAll(" ", "-"),
+    displayName: profile.displayName ?? profile.name,
+    environmentVariables: profile.environmentVariables ?? "",
+    workingDirectory: profile.workingDirectory ?? "",
+    resolvedExecutablePath: profile.resolvedExecutablePath ?? ""
+  };
 };

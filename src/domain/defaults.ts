@@ -57,14 +57,21 @@ export const createLogEntry = (
 
 export const createDefaultCliToolProfiles = (): CliToolProfile[] => {
   const timestamp = nowIso();
+  const isWindows = typeof window === "undefined" || window.kanbanAgent?.platform === "win32";
+  const shellCommand = isWindows ? "cmd" : "sh";
   return [
     {
       id: createId("cli"),
       name: "Claude Code",
       provider: "Claude Code",
-      command: "claude",
-      args: "-p",
+      providerId: "claude-code",
+      displayName: "Claude Code",
+      command: shellCommand,
+      args: isWindows ? "/c claude -p" : "-c \"claude -p\"",
       timeoutSeconds: 600,
+      environmentVariables: "",
+      workingDirectory: "",
+      resolvedExecutablePath: "",
       createdAt: timestamp,
       updatedAt: timestamp
     },
@@ -72,9 +79,14 @@ export const createDefaultCliToolProfiles = (): CliToolProfile[] => {
       id: createId("cli"),
       name: "Codex CLI",
       provider: "Codex",
-      command: "codex",
-      args: "exec -",
+      providerId: "codex-cli",
+      displayName: "Codex CLI",
+      command: shellCommand,
+      args: isWindows ? "/c codex exec -" : "-c \"codex exec -\"",
       timeoutSeconds: 600,
+      environmentVariables: "",
+      workingDirectory: "",
+      resolvedExecutablePath: "",
       createdAt: timestamp,
       updatedAt: timestamp
     }

@@ -1,13 +1,28 @@
-import { Trash2 } from "lucide-react";
+import { Play, Trash2 } from "lucide-react";
+import { useState } from "react";
+import type { CliValidationResult } from "../../desktop/cliBridge";
 import type { CliToolProfile } from "../../domain/types";
 
 interface CliToolEditorProps {
   profile: CliToolProfile;
   onDelete: () => void;
+  onTest: () => Promise<CliValidationResult>;
   onUpdate: (updates: Partial<CliToolProfile>) => void;
 }
 
-export const CliToolEditor = ({ profile, onDelete, onUpdate }: CliToolEditorProps) => {
+export const CliToolEditor = ({ profile, onDelete, onTest, onUpdate }: CliToolEditorProps) => {
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<CliValidationResult | null>(null);
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      setTestResult(await onTest());
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <section className="mini-editor">
       <div className="mini-editor-actions">
@@ -29,38 +44,83 @@ export const CliToolEditor = ({ profile, onDelete, onUpdate }: CliToolEditorProp
         </select>
       </label>
 
+      <div className="two-col-form">
+        <label>
+          Command
+          <input
+            value={profile.command}
+            onChange={(event) => onUpdate({ command: event.target.value })}
+            placeholder="cmd"
+          />
+        </label>
+
+        <label>
+          Args
+          <input
+            value={profile.args}
+            onChange={(event) => onUpdate({ args: event.target.value })}
+            placeholder="Claude: /c claude -p / Codex: /c codex exec -"
+          />
+        </label>
+      </div>
+
+      <div className="two-col-form">
+        <label>
+          Timeout seconds
+          <input
+            min={10}
+            step={30}
+            type="number"
+            value={profile.timeoutSeconds}
+            onChange={(event) => onUpdate({ timeoutSeconds: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          Working directory
+          <input
+            value={profile.workingDirectory ?? ""}
+            onChange={(event) => onUpdate({ workingDirectory: event.target.value })}
+            placeholder="Use card repo path"
+          />
+        </label>
+      </div>
+
       <label>
-        Command
+        Resolved executable path
         <input
-          value={profile.command}
-          onChange={(event) => onUpdate({ command: event.target.value })}
-          placeholder="claude, codex, or full path to .cmd/.exe"
+          value={profile.resolvedExecutablePath ?? ""}
+          onChange={(event) => onUpdate({ resolvedExecutablePath: event.target.value })}
+          placeholder="Auto-filled by Test Command"
         />
       </label>
 
       <label>
-        Args
-        <input
-          value={profile.args}
-          onChange={(event) => onUpdate({ args: event.target.value })}
-          placeholder="Claude: -p / Codex: exec -"
+        Environment variables
+        <textarea
+          rows={3}
+          value={profile.environmentVariables ?? ""}
+          onChange={(event) => onUpdate({ environmentVariables: event.target.value })}
+          placeholder={"NAME=value\nOTHER=value"}
         />
       </label>
 
-      <label>
-        Timeout seconds
-        <input
-          min={10}
-          step={30}
-          type="number"
-          value={profile.timeoutSeconds}
-          onChange={(event) => onUpdate({ timeoutSeconds: Number(event.target.value) })}
-        />
-      </label>
+      <button className="empty-action settings-inline-action" disabled={testing} type="button" onClick={handleTest}>
+        <Play size={15} />
+        {testing ? "Testing..." : "Test Command"}
+      </button>
+
+      {testResult ? (
+        <div className={`cli-validation-result ${testResult.ok ? "success" : "warning"}`}>
+          <strong>{testResult.message}</strong>
+          {testResult.resolvedExecutablePath ? <span>Resolved Path: {testResult.resolvedExecutablePath}</span> : null}
+          {testResult.version ? <span>Version: {testResult.version}</span> : null}
+          {!testResult.ok && testResult.stderr ? <pre>{testResult.stderr}</pre> : null}
+        </div>
+      ) : null}
 
       <p className="helper-text">
-        The generated prompt is piped to stdin. On Windows, use a full path like
-        C:\Users\you\AppData\Roaming\npm\claude.cmd if the app cannot find the command.
+        The generated prompt is piped to stdin. Defaults use cmd /c on Windows so npm global binaries, .cmd
+        shims, and PATH lookup resolve reliably.
       </p>
     </section>
   );

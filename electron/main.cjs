@@ -608,6 +608,9 @@ const createPatchBackup = (repoPath, files) => {
   return backupRoot;
 };
 
+const activeProviderProcesses = new Map();
+const providerResolutionCache = new Map();
+
 const uniqueExistingDirs = (dirs) => {
   const seen = new Set();
   return dirs
@@ -640,24 +643,60 @@ const existingClaudeDirs = () => {
 
 const extraExecutableDirs = () =>
   uniqueExistingDirs([
+    process.env.SystemRoot ? path.join(process.env.SystemRoot, "System32") : "",
+    process.env.windir ? path.join(process.env.windir, "System32") : "",
     process.env.APPDATA ? path.join(process.env.APPDATA, "npm") : "",
     process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Microsoft", "WindowsApps") : "",
     process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, "Programs", "nodejs") : "",
     process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "AppData", "Roaming", "npm") : "",
     process.env.USERPROFILE ? path.join(process.env.USERPROFILE, ".cargo", "bin") : "",
     process.env.USERPROFILE ? path.join(process.env.USERPROFILE, ".local", "bin") : "",
+    process.env.HOME ? path.join(process.env.HOME, ".npm-global", "bin") : "",
+    process.env.HOME ? path.join(process.env.HOME, ".local", "bin") : "",
+    process.env.HOME ? path.join(process.env.HOME, ".cargo", "bin") : "",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/usr/bin",
     ...existingClaudeDirs(),
     "C:\\Program Files\\nodejs",
     "C:\\Program Files\\PlasticSCM5\\client",
     "C:\\Program Files\\Unity Version Control\\client"
   ]);
 
-const commandEnvironment = () => {
+const parseEnvironmentVariables = (value) => {
+  if (!value) {
+    return {};
+  }
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([key, item]) => [String(key).trim(), String(item)])
+        .filter(([key]) => Boolean(key))
+    );
+  }
+
+  const parsed = {};
+  for (const line of String(value).split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0) {
+      continue;
+    }
+    parsed[trimmed.slice(0, separatorIndex).trim()] = trimmed.slice(separatorIndex + 1);
+  }
+  return parsed;
+};
+
+const commandEnvironment = (environmentVariables) => {
   const currentPath = process.env.PATH || process.env.Path || "";
   const pathParts = [...extraExecutableDirs(), ...currentPath.split(path.delimiter).filter(Boolean)];
   const nextPath = uniqueExistingDirs(pathParts).join(path.delimiter);
   return {
     ...process.env,
+    ...parseEnvironmentVariables(environmentVariables),
     PATH: nextPath,
     Path: nextPath
   };
@@ -693,41 +732,97 @@ const isRunnableFile = (candidate) => {
   }
 };
 
+const normalizeCacheKey = (command, env) => {
+  const pathValue = env.PATH || env.Path || "";
+  return `${process.platform}:${stripWrappingQuotes(command).toLowerCase()}:${pathValue}`;
+};
+
+const systemLookupExecutable = (command, env) => {
+  const clean = stripWrappingQuotes(command);
+  if (!clean || commandHasPath(clean)) {
+    return [];
+  }
+
+  try {
+    const lookupCommand = process.platform === "win32" ? "where" : "which";
+    return execFileSync(lookupCommand, [clean], {
+      encoding: "utf8",
+      env,
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"]
+    })
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((candidate, index, candidates) => candidates.indexOf(candidate) === index);
+  } catch {
+    return [];
+  }
+};
+
 const resolveExecutable = (command, env) => {
   const clean = stripWrappingQuotes(command);
+  const cacheKey = normalizeCacheKey(clean, env);
+  if (providerResolutionCache.has(cacheKey)) {
+    return providerResolutionCache.get(cacheKey);
+  }
+
   const pathValue = env.PATH || env.Path || "";
   const pathDirs = pathValue.split(path.delimiter).filter(Boolean);
 
   if (commandHasPath(clean)) {
     const resolvedCandidates = executableCandidates(clean);
     const found = resolvedCandidates.find((candidate) => isRunnableFile(candidate));
-    return {
+    const result = {
       command: found || clean,
       found: Boolean(found),
-      searched: resolvedCandidates
+      searched: resolvedCandidates,
+      source: found ? "explicit" : "missing"
     };
+    if (result.found) {
+      providerResolutionCache.set(cacheKey, result);
+    }
+    return result;
   }
 
-  const searched = [];
+  const systemMatches = systemLookupExecutable(clean, env);
+  const systemFound = systemMatches.find((candidate) => isRunnableFile(candidate));
+  if (systemFound) {
+    const result = {
+      command: systemFound,
+      found: true,
+      searched: systemMatches,
+      source: process.platform === "win32" ? "where" : "which"
+    };
+    providerResolutionCache.set(cacheKey, result);
+    return result;
+  }
+
+  const searched = [...systemMatches];
   for (const dir of pathDirs) {
     for (const candidate of executableCandidates(clean)) {
       const absoluteCandidate = path.join(dir, candidate);
       searched.push(absoluteCandidate);
       if (isRunnableFile(absoluteCandidate)) {
-        return {
+        const result = {
           command: absoluteCandidate,
           found: true,
-          searched
+          searched,
+          source: "path"
         };
+        providerResolutionCache.set(cacheKey, result);
+        return result;
       }
     }
   }
 
-  return {
+  const result = {
     command: clean,
     found: false,
-    searched
+    searched,
+    source: "missing"
   };
+  return result;
 };
 
 const prepareCommandInvocation = (command, args) => {
@@ -747,74 +842,39 @@ const prepareCommandInvocation = (command, args) => {
   };
 };
 
+const installHintForCommand = (command) => {
+  const clean = stripWrappingQuotes(command).toLowerCase();
+  if (clean.includes("claude")) {
+    return "npm install -g @anthropic-ai/claude-code";
+  }
+  if (clean.includes("codex")) {
+    return "npm install -g @openai/codex";
+  }
+  return "Install the CLI, then confirm it is available on PATH.";
+};
+
 const commandNotFoundMessage = (command, searched) => {
   const searchedPreview = searched.slice(0, 8).join("\n");
   const more = searched.length > 8 ? `\n...and ${searched.length - 8} more PATH entries.` : "";
   return [
-    `Could not find CLI command "${command}".`,
-    "Install the CLI or set Settings > CLI Agents > Command to the full executable path.",
+    `${displayNameForCommand(command)} command not found.`,
+    "",
+    `Suggested install:\n${installHintForCommand(command)}`,
+    "",
     "On Windows npm global CLIs are often under %APPDATA%\\npm, for example C:\\Users\\<you>\\AppData\\Roaming\\npm\\claude.cmd.",
-    "Claude config folders such as C:\\Users\\<you>\\.claude are searched too, but the Command must resolve to a real executable file.",
-    searchedPreview ? `Searched:\n${searchedPreview}${more}` : ""
+    "You can also set Settings > CLI Agents > Resolved executable path to a real executable file.",
+    searchedPreview ? `Possible detected paths:\n${searchedPreview}${more}` : ""
   ]
     .filter(Boolean)
     .join("\n");
 };
 
-const runCommand = (command, args, cwd, stdin, timeoutMs) =>
-  new Promise((resolve) => {
-    const env = commandEnvironment();
-    const executable = resolveExecutable(command, env);
-    if (!executable.found && process.platform === "win32") {
-      resolve({
-        ok: false,
-        stdout: "",
-        stderr: commandNotFoundMessage(command, executable.searched),
-        timedOut: false,
-        exitCode: null
-      });
-      return;
-    }
-
-    const invocation = prepareCommandInvocation(executable.command, args);
-    const child = spawn(invocation.command, invocation.args, {
-      cwd,
-      shell: invocation.shell,
-      windowsHide: true,
-      env
-    });
-
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, timeoutMs);
-
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      const stderrText =
-        error.code === "ENOENT" ? commandNotFoundMessage(command, executable.searched) : error.message;
-      resolve({ ok: false, stdout, stderr: stderrText, timedOut, exitCode: null });
-    });
-    child.on("close", (exitCode) => {
-      clearTimeout(timer);
-      resolve({ ok: exitCode === 0 && !timedOut, stdout, stderr, timedOut, exitCode });
-    });
-
-    if (stdin) {
-      child.stdin.write(stdin);
-    }
-    child.stdin.end();
-  });
+const displayNameForCommand = (command) => {
+  const clean = stripWrappingQuotes(command);
+  if (clean.toLowerCase().includes("claude")) return "Claude";
+  if (clean.toLowerCase().includes("codex")) return "Codex";
+  return clean || "CLI";
+};
 
 const splitArgs = (value) => {
   const args = [];
@@ -851,85 +911,395 @@ const splitArgs = (value) => {
   return args;
 };
 
+const isCmdWrapper = (command) => {
+  const base = path.basename(stripWrappingQuotes(command)).toLowerCase();
+  return process.platform === "win32" && (base === "cmd" || base === "cmd.exe");
+};
+
+const isPosixShellWrapper = (command) => {
+  const base = path.basename(stripWrappingQuotes(command)).toLowerCase();
+  return process.platform !== "win32" && ["sh", "bash", "zsh"].includes(base);
+};
+
+const extractShellTarget = (command, args) => {
+  if (isCmdWrapper(command)) {
+    const markerIndex = args.findIndex((arg) => arg.toLowerCase() === "/c");
+    if (markerIndex >= 0 && args[markerIndex + 1]) {
+      return { command: args[markerIndex + 1], index: markerIndex + 1 };
+    }
+  }
+
+  if (isPosixShellWrapper(command)) {
+    const markerIndex = args.findIndex((arg) => arg === "-c");
+    if (markerIndex >= 0 && args[markerIndex + 1]) {
+      const [target] = splitArgs(args[markerIndex + 1]);
+      return target ? { command: target, index: markerIndex + 1, inline: true } : null;
+    }
+  }
+
+  return null;
+};
+
+const hasShellControlOperator = (value) => /(^|[\s])(&&?|\|\|?|[<>]|;)([\s]|$)/.test(String(value));
+
+const parseArgs = (args) => (Array.isArray(args) ? args.map(String) : splitArgs(args));
+
+const createProviderInvocation = (options) => {
+  const env = commandEnvironment(options.environmentVariables);
+  const args = parseArgs(options.args);
+  const command = String(options.command || "").trim();
+  const explicitPath = stripWrappingQuotes(options.resolvedExecutablePath || "");
+
+  if (!command) {
+    return { ok: false, stderr: "CLI command is required.", env, searched: [] };
+  }
+
+  const shellTarget = extractShellTarget(command, args);
+  let executable = resolveExecutable(command, env);
+  let targetResolution = null;
+  const invocationArgs = [...args];
+
+  if (shellTarget) {
+    const shellPayload = shellTarget.inline ? invocationArgs[shellTarget.index] : invocationArgs.slice(shellTarget.index).join(" ");
+    if (hasShellControlOperator(shellPayload)) {
+      return {
+        ok: false,
+        stderr: "CLI shell arguments contain unsupported shell control operators. Configure command and args as structured tokens instead.",
+        env,
+        executable,
+        targetResolution,
+        searched: []
+      };
+    }
+
+    targetResolution =
+      explicitPath && isRunnableFile(explicitPath)
+        ? { command: explicitPath, found: true, searched: [explicitPath], source: "explicit" }
+        : resolveExecutable(shellTarget.command, env);
+
+    if (!targetResolution.found) {
+      return {
+        ok: false,
+        stderr: commandNotFoundMessage(shellTarget.command, targetResolution.searched),
+        env,
+        executable,
+        targetResolution,
+        searched: targetResolution.searched
+      };
+    }
+
+    if (shellTarget.inline) {
+      const inlineArgs = splitArgs(invocationArgs[shellTarget.index]);
+      inlineArgs[0] = targetResolution.command;
+      invocationArgs[shellTarget.index] = inlineArgs.map(quoteShellArg).join(" ");
+    } else {
+      invocationArgs[shellTarget.index] = targetResolution.command;
+    }
+  } else if (explicitPath && isRunnableFile(explicitPath)) {
+    executable = { command: explicitPath, found: true, searched: [explicitPath], source: "explicit" };
+  }
+
+  if (!executable.found) {
+    return {
+      ok: false,
+      stderr: commandNotFoundMessage(command, executable.searched),
+      env,
+      executable,
+      targetResolution,
+      searched: executable.searched
+    };
+  }
+
+  const invocation = prepareCommandInvocation(executable.command, invocationArgs);
+  return {
+    ok: true,
+    command,
+    args: invocationArgs,
+    env,
+    invocation,
+    executable,
+    targetResolution,
+    resolvedExecutablePath: targetResolution?.command || executable.command,
+    searched: targetResolution?.searched || executable.searched
+  };
+};
+
+const quoteShellArg = (value) => {
+  const text = String(value);
+  if (!/[\s"'&|<>]/.test(text)) {
+    return text;
+  }
+  return `"${text.replaceAll("\"", "\\\"")}"`;
+};
+
+const emitProviderOutput = (runId, stream, chunk) => {
+  if (!runId) {
+    return;
+  }
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send("cli:output", {
+      runId,
+      stream,
+      chunk,
+      timestamp: new Date().toISOString()
+    });
+  }
+};
+
+const runProviderProcess = (options) =>
+  new Promise((resolve) => {
+    const invocationResult = createProviderInvocation(options);
+    if (!invocationResult.ok) {
+      resolve({
+        ok: false,
+        stdout: "",
+        stderr: invocationResult.stderr,
+        timedOut: false,
+        exitCode: null,
+        resolvedExecutablePath: "",
+        logs: []
+      });
+      return;
+    }
+
+    const cwd = options.cwd || app.getPath("home");
+    const child = spawn(invocationResult.invocation.command, invocationResult.invocation.args, {
+      cwd,
+      shell: invocationResult.invocation.shell,
+      windowsHide: true,
+      env: invocationResult.env
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let cancelled = false;
+    const logs = [
+      {
+        stream: "system",
+        chunk: `Resolved executable: ${invocationResult.resolvedExecutablePath}`,
+        timestamp: new Date().toISOString()
+      }
+    ];
+
+    if (options.runId) {
+      activeProviderProcesses.set(options.runId, child);
+    }
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, options.timeoutMs);
+
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      logs.push({ stream: "stdout", chunk: text, timestamp: new Date().toISOString() });
+      emitProviderOutput(options.runId, "stdout", text);
+      options.onStdout?.(text);
+    });
+    child.stderr.on("data", (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      logs.push({ stream: "stderr", chunk: text, timestamp: new Date().toISOString() });
+      emitProviderOutput(options.runId, "stderr", text);
+      options.onStderr?.(text);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      if (options.runId) {
+        activeProviderProcesses.delete(options.runId);
+      }
+      const stderrText =
+        error.code === "ENOENT" ? commandNotFoundMessage(options.command, invocationResult.searched) : error.message;
+      resolve({
+        ok: false,
+        stdout,
+        stderr: stderrText,
+        timedOut,
+        cancelled,
+        exitCode: null,
+        resolvedExecutablePath: invocationResult.resolvedExecutablePath,
+        logs
+      });
+    });
+    child.on("close", (exitCode, signal) => {
+      clearTimeout(timer);
+      if (options.runId) {
+        activeProviderProcesses.delete(options.runId);
+      }
+      cancelled = signal === "SIGTERM" && !timedOut;
+      resolve({
+        ok: exitCode === 0 && !timedOut && !cancelled,
+        stdout,
+        stderr: timedOut ? `${stderr}\nCLI command timed out.`.trim() : stderr,
+        timedOut,
+        cancelled,
+        exitCode,
+        resolvedExecutablePath: invocationResult.resolvedExecutablePath,
+        logs
+      });
+    });
+
+    if (options.stdin) {
+      child.stdin.write(options.stdin);
+    }
+    child.stdin.end();
+  });
+
+const runCommand = (command, args, cwd, stdin, timeoutMs) =>
+  runProviderProcess({ command, args, cwd, stdin, timeoutMs });
+
+const cancelProviderProcess = (runId) => {
+  const child = activeProviderProcesses.get(runId);
+  if (!child) {
+    return { ok: false, message: "No running CLI process was found for this session." };
+  }
+  child.kill();
+  return { ok: true, message: "CLI process cancellation requested." };
+};
+
+const collectVersion = async (options, cwd) => {
+  const invocation = createProviderInvocation(options);
+  if (!invocation.ok) {
+    return "";
+  }
+  const target = extractShellTarget(options.command, parseArgs(options.args));
+  const versionCommand = target ? invocation.resolvedExecutablePath : invocation.executable.command;
+  const versionResult = await runProviderProcess({
+    command: versionCommand,
+    args: ["--version"],
+    cwd,
+    stdin: "",
+    timeoutMs: 10000,
+    environmentVariables: options.environmentVariables
+  });
+  return [versionResult.stdout, versionResult.stderr].filter(Boolean).join("\n").trim().split(/\r?\n/)[0] || "";
+};
+
+const validateProviderCommand = async (options) => {
+  const command = String(options.command || "").trim();
+  const cwd = String(options.cwd || options.workingDirectory || app.getPath("home"));
+  const timeoutMs = Math.max(10, Number(options.timeoutSeconds || 60)) * 1000;
+  if (!command) {
+    return {
+      ok: false,
+      message: "CLI command is required.",
+      resolvedExecutablePath: "",
+      version: "",
+      stdout: "",
+      stderr: "CLI command is required.",
+      exitCode: null
+    };
+  }
+
+  if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
+    return {
+      ok: false,
+      message: "CLI working directory is not readable.",
+      resolvedExecutablePath: "",
+      version: "",
+      stdout: "",
+      stderr: `Working directory not found: ${cwd}`,
+      exitCode: null
+    };
+  }
+
+  const preflight = createProviderInvocation(options);
+  if (!preflight.ok) {
+    return {
+      ok: false,
+      message: preflight.stderr,
+      resolvedExecutablePath: "",
+      version: "",
+      stdout: "",
+      stderr: preflight.stderr,
+      exitCode: null
+    };
+  }
+
+  const version = await collectVersion(options, cwd);
+  const testPrompt = "Reply with OK to confirm stdin and stdout are working.";
+  const result = await runProviderProcess({
+    ...options,
+    cwd,
+    stdin: testPrompt,
+    timeoutMs,
+    runId: `validation-${Date.now()}`
+  });
+  const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+  const ok = result.ok && Boolean(output);
+  const providerName = displayNameForCommand(preflight.targetResolution?.command || preflight.command);
+
+  return {
+    ok,
+    message: ok
+      ? `${providerName} detected successfully`
+      : `${providerName} validation failed${result.timedOut ? " after timing out" : ""}.`,
+    resolvedExecutablePath: result.resolvedExecutablePath,
+    version,
+    stdout: result.stdout,
+    stderr: result.stderr || (ok ? "" : "Command produced no output."),
+    exitCode: result.exitCode,
+    timedOut: result.timedOut,
+    logs: result.logs
+  };
+};
+
 const registerCliHandlers = () => {
   ipcMain.handle("cli:run", async (_event, options) => {
     const command = String(options.command || "").trim();
     const prompt = String(options.prompt || "");
-    const cwd = String(options.cwd || app.getPath("home"));
+    const cwd = String(options.cwd || options.workingDirectory || app.getPath("home"));
     const timeoutMs = Math.max(10, Number(options.timeoutSeconds || 300)) * 1000;
 
     if (!command) {
-      return { ok: false, exitCode: null, stdout: "", stderr: "CLI command is required.", timedOut: false };
+      return { ok: false, exitCode: null, stdout: "", stderr: "CLI command is required.", timedOut: false, logs: [] };
     }
 
     if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
-      return { ok: false, exitCode: null, stdout: "", stderr: "CLI working directory is not readable.", timedOut: false };
+      return {
+        ok: false,
+        exitCode: null,
+        stdout: "",
+        stderr: "CLI working directory is not readable.",
+        timedOut: false,
+        logs: []
+      };
     }
 
-    return new Promise((resolve) => {
-      const env = commandEnvironment();
-      const executable = resolveExecutable(command, env);
-      if (!executable.found && process.platform === "win32") {
-        resolve({
-          ok: false,
-          exitCode: null,
-          stdout: "",
-          stderr: commandNotFoundMessage(command, executable.searched),
-          timedOut: false
-        });
-        return;
+    const maxOutput = 180000;
+    const trimOutput = (value) => (value.length > maxOutput ? value.slice(value.length - maxOutput) : value);
+    let stdout = "";
+    let stderr = "";
+
+    const result = await runProviderProcess({
+      command,
+      args: options.args,
+      cwd,
+      stdin: prompt,
+      timeoutMs,
+      runId: String(options.runId || ""),
+      environmentVariables: options.environmentVariables,
+      resolvedExecutablePath: options.resolvedExecutablePath,
+      onStdout: (chunk) => {
+        stdout = trimOutput(stdout + chunk);
+      },
+      onStderr: (chunk) => {
+        stderr = trimOutput(stderr + chunk);
       }
-
-      const invocation = prepareCommandInvocation(executable.command, splitArgs(options.args));
-      const child = spawn(invocation.command, invocation.args, {
-        cwd,
-        shell: invocation.shell,
-        windowsHide: true,
-        env
-      });
-
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-      const maxOutput = 180000;
-
-      const trimOutput = (value) => (value.length > maxOutput ? value.slice(value.length - maxOutput) : value);
-
-      const timer = setTimeout(() => {
-        timedOut = true;
-        child.kill();
-      }, timeoutMs);
-
-      child.stdout.on("data", (chunk) => {
-        stdout = trimOutput(stdout + chunk.toString());
-      });
-
-      child.stderr.on("data", (chunk) => {
-        stderr = trimOutput(stderr + chunk.toString());
-      });
-
-      child.on("error", (error) => {
-        clearTimeout(timer);
-        const stderrText =
-          error.code === "ENOENT" ? commandNotFoundMessage(command, executable.searched) : error.message;
-        resolve({ ok: false, exitCode: null, stdout, stderr: stderrText, timedOut });
-      });
-
-      child.on("close", (exitCode) => {
-        clearTimeout(timer);
-        resolve({
-          ok: exitCode === 0 && !timedOut,
-          exitCode,
-          stdout,
-          stderr: timedOut ? `${stderr}\nCLI command timed out.`.trim() : stderr,
-          timedOut
-        });
-      });
-
-      child.stdin.write(prompt);
-      child.stdin.end();
     });
+
+    return {
+      ...result,
+      stdout: stdout || result.stdout,
+      stderr: stderr || result.stderr
+    };
   });
+
+  ipcMain.handle("cli:cancel", async (_event, options) => cancelProviderProcess(String(options.runId || "")));
+
+  ipcMain.handle("cli:test", async (_event, options) => validateProviderCommand(options));
 };
 
 const createWindow = () => {

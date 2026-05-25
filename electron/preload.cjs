@@ -22,6 +22,13 @@ contextBridge.exposeInMainWorld("kanbanAgent", {
     githubPr: (options) => ipcRenderer.invoke("repo:github-pr", options)
   },
   cli: {
-    run: (options) => ipcRenderer.invoke("cli:run", options)
+    run: (options) => ipcRenderer.invoke("cli:run", options),
+    cancel: (options) => ipcRenderer.invoke("cli:cancel", options),
+    test: (options) => ipcRenderer.invoke("cli:test", options),
+    onOutput: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("cli:output", listener);
+      return () => ipcRenderer.removeListener("cli:output", listener);
+    }
   }
 });

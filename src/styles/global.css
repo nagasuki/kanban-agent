@@ -977,6 +977,7 @@ label {
 }
 
 .cli-status-card,
+.cli-validation-result,
 .diff-mini-preview {
   display: grid;
   gap: 4px;
@@ -991,6 +992,35 @@ label {
 
 .cli-status-card {
   color: var(--muted-2);
+}
+
+.cli-validation-result {
+  color: var(--muted-2);
+  font-family: inherit;
+}
+
+.cli-validation-result.success {
+  border-color: color-mix(in srgb, var(--success) 52%, var(--border));
+}
+
+.cli-validation-result.warning {
+  border-color: color-mix(in srgb, var(--warning) 52%, var(--border));
+}
+
+.cli-validation-result strong {
+  color: var(--text-strong);
+}
+
+.cli-validation-result span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.cli-validation-result pre {
+  max-height: 160px;
+  margin: 6px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
 }
 
 .cli-status-card span:first-child {
