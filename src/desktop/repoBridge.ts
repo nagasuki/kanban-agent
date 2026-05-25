@@ -73,6 +73,7 @@ export const repoBridge = {
     blockedFilePatterns: string;
     patchText: string;
     repoPath: string;
+    versionControlProvider: "git" | "plastic";
   }): Promise<{ ok: boolean; output: string; backupPath: string }> => {
     if (!window.kanbanAgent?.repo) {
       return { ok: false, output: "Patch apply is only available in the Electron desktop app.", backupPath: "" };

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell } = require("electron");
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const secretsFilePath = () => path.join(app.getPath("userData"), "secure-api-keys.json");
@@ -727,6 +728,7 @@ const registerRepoHandlers = () => {
   ipcMain.handle("repo:apply-patch", async (_event, options) => {
     const repoPath = String(options.repoPath || "");
     const patchText = String(options.patchText || "");
+    const provider = String(options.versionControlProvider || "git");
     const blockedPatterns = parseCsv(options.blockedFilePatterns);
     const allowedFolders = parseCsv(options.allowedEditableFolders);
 
@@ -735,6 +737,14 @@ const registerRepoHandlers = () => {
     }
 
     const touchedFiles = extractPatchFiles(patchText);
+    if (touchedFiles.length === 0 || !looksLikeUnifiedPatch(patchText)) {
+      return {
+        ok: false,
+        output: "No valid patch was found. Apply Patch requires a unified diff with file headers such as diff --git, ---/+++, and @@ hunks.",
+        backupPath: ""
+      };
+    }
+
     const blockedFile = touchedFiles.find(
       (file) => matchesPattern(file, blockedPatterns) || !isAllowedPath(file, allowedFolders)
     );
@@ -743,6 +753,26 @@ const registerRepoHandlers = () => {
     }
 
     const backupPath = createPatchBackup(repoPath, touchedFiles);
+    if (provider === "plastic") {
+      const patchFile = writeTempPatchFile(patchText);
+      const apply = await runCommand("cm", ["patch", "--apply", patchFile], repoPath, "", 120000);
+      try {
+        fs.rmSync(path.dirname(patchFile), { recursive: true, force: true });
+      } catch {
+        // Best effort cleanup only.
+      }
+
+      return {
+        ok: apply.ok,
+        output:
+          [apply.stdout, apply.stderr].filter(Boolean).join("\n") ||
+          (apply.ok
+            ? "Plastic patch applied."
+            : "Plastic patch apply failed. Make sure Unity Version Control CLI and GNU patch are available in PATH."),
+        backupPath
+      };
+    }
+
     const check = await runCommand("git", ["-C", repoPath, "apply", "--check"], repoPath, patchText, 30000);
     if (!check.ok) {
       return { ok: false, output: check.stderr || check.stdout || "Patch check failed.", backupPath };
@@ -878,14 +908,44 @@ const registerRepoHandlers = () => {
 const extractPatchFiles = (patchText) => {
   const files = new Set();
   for (const line of patchText.split(/\r?\n/)) {
+    if (line.startsWith("diff --git ")) {
+      const parts = line.trim().split(/\s+/);
+      cleanPatchPath(parts[3] || parts[2])?.forEach((file) => files.add(file));
+    }
     if (line.startsWith("+++ b/")) {
       files.add(line.slice("+++ b/".length).trim());
+    } else if (line.startsWith("+++ ")) {
+      cleanPatchPath(line.slice("+++ ".length))?.forEach((file) => files.add(file));
     }
     if (line.startsWith("--- a/")) {
       files.add(line.slice("--- a/".length).trim());
+    } else if (line.startsWith("--- ")) {
+      cleanPatchPath(line.slice("--- ".length))?.forEach((file) => files.add(file));
     }
   }
   return Array.from(files).filter((file) => file && file !== "/dev/null");
+};
+
+const cleanPatchPath = (value) => {
+  const clean = String(value || "")
+    .trim()
+    .replace(/^"|"$/g, "")
+    .split(/\t|\s+\d{4}-\d{2}-\d{2}/)[0]
+    .trim();
+  if (!clean || clean === "/dev/null") {
+    return [];
+  }
+  return [clean.replace(/^[ab]\//, "")];
+};
+
+const looksLikeUnifiedPatch = (patchText) =>
+  /(^|\n)(diff --git |--- |\+\+\+ )/.test(patchText) && /(^|\n)@@ /.test(patchText);
+
+const writeTempPatchFile = (patchText) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kanban-agent-patch-"));
+  const patchFile = path.join(directory, "changes.patch");
+  fs.writeFileSync(patchFile, patchText, "utf8");
+  return patchFile;
 };
 
 const createPatchBackup = (repoPath, files) => {

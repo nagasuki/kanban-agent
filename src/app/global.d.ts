@@ -61,6 +61,7 @@ declare global {
             blockedFilePatterns: string;
             patchText: string;
             repoPath: string;
+            versionControlProvider: "git" | "plastic";
           }
         ) => Promise<{ ok: boolean; output: string; backupPath: string }>;
         runCommand: (options: { command: string; repoPath: string }) => Promise<{ ok: boolean; output: string }>;

@@ -828,9 +828,9 @@ export const App = () => {
       return;
     }
 
-    const patchText = card.patchText || card.diffPlaceholder;
+    const patchText = extractPatchForApply(card.patchText || card.diffPlaceholder);
     if (!patchText.trim()) {
-      setWarning("No patch text is saved on this card.");
+      setWarning("No valid patch was found on this card. Ask the agent to generate a unified diff, or paste one into the Diff/Patch field.");
       return;
     }
 
@@ -838,7 +838,11 @@ export const App = () => {
       allowedEditableFolders: activeWorkspace.allowedEditableFolders,
       blockedFilePatterns: activeWorkspace.blockedFilePatterns,
       patchText,
-      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath
+      repoPath: card.projectContext.repoPath || activeWorkspace.repoPath,
+      versionControlProvider:
+        activeWorkspace.repoInspection?.versionControlProvider === "plastic" || activeWorkspace.versionControlProvider === "plastic"
+          ? "plastic"
+          : "git"
     });
     setWarning(result.ok ? null : result.output);
     updateActiveWorkspace((workspace) => recordPatchApplyResult(workspace, cardId, result));
@@ -1103,4 +1107,27 @@ export const App = () => {
       ) : null}
     </div>
   );
+};
+
+const extractPatchForApply = (value: string): string => {
+  const text = value.trim();
+  if (!text) {
+    return "";
+  }
+
+  const fencedDiff = text.match(/```(?:diff|patch)?\s*([\s\S]*?)```/i);
+  const candidate = fencedDiff?.[1]?.trim() || text;
+  const lines = candidate.split(/\r?\n/);
+  const firstPatchLine = lines.findIndex((line) =>
+    line.startsWith("diff --git ") ||
+    line.startsWith("--- ") ||
+    line.startsWith("Index: ")
+  );
+
+  if (firstPatchLine < 0) {
+    return "";
+  }
+
+  const patch = lines.slice(firstPatchLine).join("\n").trim();
+  return /(?:^|\n)(diff --git |--- |\+\+\+ |@@ )/.test(patch) ? `${patch}\n` : "";
 };
