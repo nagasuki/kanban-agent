@@ -727,7 +727,7 @@ const registerRepoHandlers = () => {
 
   ipcMain.handle("repo:apply-patch", async (_event, options) => {
     const repoPath = String(options.repoPath || "");
-    const patchText = String(options.patchText || "");
+    const patchText = sanitizePatchText(String(options.patchText || ""));
     const provider = String(options.versionControlProvider || "git");
     const blockedPatterns = parseCsv(options.blockedFilePatterns);
     const allowedFolders = parseCsv(options.allowedEditableFolders);
@@ -773,12 +773,12 @@ const registerRepoHandlers = () => {
       };
     }
 
-    const check = await runCommand("git", ["-C", repoPath, "apply", "--check"], repoPath, patchText, 30000);
+    const check = await runCommand("git", ["-C", repoPath, "apply", "--check", "--recount"], repoPath, patchText, 30000);
     if (!check.ok) {
       return { ok: false, output: check.stderr || check.stdout || "Patch check failed.", backupPath };
     }
 
-    const apply = await runCommand("git", ["-C", repoPath, "apply"], repoPath, patchText, 30000);
+    const apply = await runCommand("git", ["-C", repoPath, "apply", "--recount", "--whitespace=fix"], repoPath, patchText, 30000);
     return {
       ok: apply.ok,
       output: [apply.stdout, apply.stderr].filter(Boolean).join("\n") || (apply.ok ? "Patch applied." : "Patch apply failed."),
@@ -943,6 +943,97 @@ const cleanPatchPath = (value) => {
 
 const looksLikeUnifiedPatch = (patchText) =>
   /(^|\n)(diff --git |Index: |--- )/.test(patchText) && /(^|\n)\+\+\+ /.test(patchText) && /(^|\n)@@ /.test(patchText);
+
+const sanitizePatchText = (patchText) => sanitizePatchLines(String(patchText || "").split(/\r?\n/)).join("\n").trim() + "\n";
+
+const sanitizePatchLines = (lines) => {
+  const firstPatchLine = lines.findIndex(
+    (line) => line.startsWith("diff --git ") || line.startsWith("--- ") || line.startsWith("Index: ")
+  );
+  if (firstPatchLine < 0) {
+    return [];
+  }
+
+  const patchLines = [];
+  let inHunk = false;
+  let oldTarget = 0;
+  let newTarget = 0;
+  let oldCount = 0;
+  let newCount = 0;
+
+  for (const line of lines.slice(firstPatchLine)) {
+    if (line.startsWith("```")) {
+      break;
+    }
+
+    if (isPatchHeaderLine(line)) {
+      inHunk = false;
+      patchLines.push(line);
+      continue;
+    }
+
+    if (line.startsWith("@@ ")) {
+      const counts = parseHunkCounts(line);
+      inHunk = true;
+      oldTarget = counts.oldCount;
+      newTarget = counts.newCount;
+      oldCount = 0;
+      newCount = 0;
+      patchLines.push(line);
+      continue;
+    }
+
+    if (!inHunk) {
+      if (line.trim() === "") {
+        continue;
+      }
+      break;
+    }
+
+    const normalizedLine = line === "" ? " " : /^[ +\-\\]/.test(line) ? line : ` ${line}`;
+    if (normalizedLine.startsWith("\\ ")) {
+      patchLines.push(normalizedLine);
+      continue;
+    }
+    if (!normalizedLine.startsWith("+")) {
+      oldCount += 1;
+    }
+    if (!normalizedLine.startsWith("-")) {
+      newCount += 1;
+    }
+    patchLines.push(normalizedLine);
+    if (oldCount >= oldTarget && newCount >= newTarget) {
+      inHunk = false;
+    }
+  }
+
+  return patchLines;
+};
+
+const isPatchHeaderLine = (line) =>
+  line.startsWith("diff --git ") ||
+  line.startsWith("Index: ") ||
+  line.startsWith("====") ||
+  line.startsWith("index ") ||
+  line.startsWith("--- ") ||
+  line.startsWith("+++ ") ||
+  line.startsWith("new file mode ") ||
+  line.startsWith("deleted file mode ") ||
+  line.startsWith("old mode ") ||
+  line.startsWith("new mode ") ||
+  line.startsWith("similarity index ") ||
+  line.startsWith("rename from ") ||
+  line.startsWith("rename to ") ||
+  line.startsWith("copy from ") ||
+  line.startsWith("copy to ");
+
+const parseHunkCounts = (line) => {
+  const match = line.match(/^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/);
+  return {
+    oldCount: Number.parseInt(match?.[1] ?? "1", 10),
+    newCount: Number.parseInt(match?.[2] ?? "1", 10)
+  };
+};
 
 const writeTempPatchFile = (patchText) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kanban-agent-patch-"));

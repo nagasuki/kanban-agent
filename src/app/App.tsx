@@ -1141,8 +1141,94 @@ const extractPatchCandidate = (value: string): string => {
     return "";
   }
 
-  const patch = lines.slice(firstPatchLine).join("\n").trim();
+  const patch = sanitizePatchLines(lines.slice(firstPatchLine)).join("\n").trim();
   const hasFileHeader = /(?:^|\n)(diff --git |Index: |--- )/.test(patch) && /(?:^|\n)\+\+\+ /.test(patch);
   const hasHunk = /(?:^|\n)@@ /.test(patch);
   return hasFileHeader && hasHunk ? `${patch}\n` : "";
+};
+
+const sanitizePatchLines = (lines: string[]): string[] => {
+  const patchLines: string[] = [];
+  let inHunk = false;
+  let oldTarget = 0;
+  let newTarget = 0;
+  let oldCount = 0;
+  let newCount = 0;
+
+  const finishHunkIfComplete = () => {
+    if (inHunk && oldCount >= oldTarget && newCount >= newTarget) {
+      inHunk = false;
+    }
+  };
+
+  for (const line of lines) {
+    if (line.startsWith("```")) {
+      break;
+    }
+
+    if (isPatchHeaderLine(line)) {
+      inHunk = false;
+      patchLines.push(line);
+      continue;
+    }
+
+    if (line.startsWith("@@ ")) {
+      const counts = parseHunkCounts(line);
+      inHunk = true;
+      oldTarget = counts.oldCount;
+      newTarget = counts.newCount;
+      oldCount = 0;
+      newCount = 0;
+      patchLines.push(line);
+      continue;
+    }
+
+    if (!inHunk) {
+      if (line.trim() === "") {
+        continue;
+      }
+      break;
+    }
+
+    const normalizedLine = line === "" ? " " : /^[ +\-\\]/.test(line) ? line : ` ${line}`;
+    if (normalizedLine.startsWith("\\ ")) {
+      patchLines.push(normalizedLine);
+      continue;
+    }
+    if (!normalizedLine.startsWith("+")) {
+      oldCount += 1;
+    }
+    if (!normalizedLine.startsWith("-")) {
+      newCount += 1;
+    }
+    patchLines.push(normalizedLine);
+    finishHunkIfComplete();
+  }
+
+  return patchLines;
+};
+
+const isPatchHeaderLine = (line: string): boolean =>
+  line.startsWith("diff --git ") ||
+  line.startsWith("Index: ") ||
+  line.startsWith("====") ||
+  line.startsWith("index ") ||
+  line.startsWith("--- ") ||
+  line.startsWith("+++ ") ||
+  line.startsWith("new file mode ") ||
+  line.startsWith("deleted file mode ") ||
+  line.startsWith("old mode ") ||
+  line.startsWith("new mode ") ||
+  line.startsWith("similarity index ") ||
+  line.startsWith("rename from ") ||
+  line.startsWith("rename to ") ||
+  line.startsWith("copy from ") ||
+  line.startsWith("copy to ");
+
+const parseHunkCounts = (line: string): { oldCount: number; newCount: number } => {
+  const match = line.match(/^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/);
+  return {
+    oldCount: Number.parseInt(match?.[1] ?? "1", 10),
+    newCount: Number.parseInt(match?.[2] ?? "1", 10)
+  };
 };
