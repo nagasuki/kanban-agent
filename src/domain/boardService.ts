@@ -5,6 +5,7 @@ import {
   createDefaultValidationRules,
   createLogEntry
 } from "./defaults";
+import { resolveImplementAgent, resolvePlanAgent, supportsImplementMode, supportsPlanMode } from "./agentCapabilities";
 import { buildExecutionPreview, createImplementationLogBurst } from "./executionService";
 import { createId, nowIso } from "./id";
 import type {
@@ -41,7 +42,7 @@ export const createCard = (workspace: Workspace, columnId: BoardColumnId): Works
   }
 
   const timestamp = nowIso();
-  const defaultAgent = workspace.agentProfiles.find((profile) => profile.id === workspace.defaultAgentProfileId);
+  const defaultAgent = columnId === "my-plan" ? resolvePlanAgent(workspace) : resolveImplementAgent(workspace);
   const card: KanbanCard = {
     id: createId("card"),
     workspaceId: workspace.id,
@@ -52,6 +53,8 @@ export const createCard = (workspace: Workspace, columnId: BoardColumnId): Works
     runnerType: defaultAgent?.defaultRunnerType ?? (workspace.defaultCliToolProfileId ? "cli" : "api"),
     modelProfileId: defaultAgent?.defaultModelProfileId ?? workspace.defaultModelProfileId,
     agentProfileId: defaultAgent?.id,
+    planAgentProfileId: columnId === "my-plan" ? defaultAgent?.id : undefined,
+    implementAgentProfileId: columnId === "start-implement" ? defaultAgent?.id : undefined,
     cliToolProfileId: defaultAgent?.defaultCliToolProfileId || workspace.defaultCliToolProfileId || undefined,
     executionMode: defaultAgent?.defaultExecutionMode ?? "Suggest Patch",
     priority: "Normal",
@@ -75,6 +78,9 @@ export const createCard = (workspace: Workspace, columnId: BoardColumnId): Works
     prDescription: "",
     prUrl: "",
     locked: false,
+    planCompletedAt: columnId === "start-implement" ? timestamp : undefined,
+    implementationStartedAt: undefined,
+    implementationCompletedAt: undefined,
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -97,9 +103,13 @@ export const createPlanCardFromPrompt = (
   }
 
   const timestamp = nowIso();
-  const defaultAgent = workspace.agentProfiles.find((profile) =>
-    profile.id === (options.agentProfileId || workspace.defaultAgentProfileId)
-  );
+  const defaultAgent = resolvePlanAgent(workspace, options.agentProfileId);
+  if (!defaultAgent) {
+    return { workspace, warning: "No Plan Agent is configured." };
+  }
+  if (!supportsPlanMode(defaultAgent)) {
+    return { workspace, warning: "Selected agent cannot run Plan Mode." };
+  }
   const title = titleFromPrompt(cleanPrompt);
   const card: KanbanCard = {
     id: createId("card"),
@@ -111,6 +121,8 @@ export const createPlanCardFromPrompt = (
     runnerType: options.runnerType ?? defaultAgent?.defaultRunnerType ?? (workspace.defaultCliToolProfileId ? "cli" : "api"),
     modelProfileId: options.modelProfileId ?? defaultAgent?.defaultModelProfileId ?? workspace.defaultModelProfileId,
     agentProfileId: options.agentProfileId ?? defaultAgent?.id,
+    planAgentProfileId: options.agentProfileId ?? defaultAgent?.id,
+    implementAgentProfileId: resolveImplementAgent(workspace, workspace.defaultImplementAgentProfileId)?.id,
     cliToolProfileId:
       options.cliToolProfileId ?? (defaultAgent?.defaultCliToolProfileId || workspace.defaultCliToolProfileId || undefined),
     executionMode: "Plan Only",
@@ -138,6 +150,9 @@ export const createPlanCardFromPrompt = (
     prDescription: "",
     prUrl: "",
     locked: true,
+    planCompletedAt: undefined,
+    implementationStartedAt: undefined,
+    implementationCompletedAt: undefined,
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -166,6 +181,7 @@ export const completePlanDraft = (
             ...card,
             description: result.rawText || result.summary,
             locked: false,
+            planCompletedAt: result.ok ? timestamp : card.planCompletedAt,
             activityLog: [
               ...card.activityLog,
               createLogEntry(
@@ -244,6 +260,14 @@ export const moveCard = (workspace: Workspace, cardId: string, targetColumnId: B
     };
   }
 
+  const prepared = prepareCardForColumn(workspace, card, targetColumnId);
+  if (prepared.warning) {
+    return {
+      workspace: appendCardLog(workspace, cardId, prepared.warning, "warning"),
+      warning: prepared.warning
+    };
+  }
+
   const timestamp = nowIso();
   const movedCards = workspace.cards.map((item) => {
     if (item.id !== cardId) {
@@ -253,6 +277,7 @@ export const moveCard = (workspace: Workspace, cardId: string, targetColumnId: B
     const logs = [...item.activityLog, ...logsForMove(item, targetColumnId, workspace)];
     return {
       ...item,
+      ...prepared.updates,
       columnId: targetColumnId,
       activityLog: logs,
       updatedAt: timestamp
@@ -293,6 +318,14 @@ export const reorderCard = (
     };
   }
 
+  const prepared = prepareCardForColumn(workspace, card, targetColumnId);
+  if (prepared.warning) {
+    return {
+      workspace: appendCardLog(workspace, cardId, prepared.warning, "warning"),
+      warning: prepared.warning
+    };
+  }
+
   const timestamp = nowIso();
   const otherCards = workspace.cards.filter((item) => item.id !== cardId);
   const beforeTarget = otherCards.filter((item) => item.columnId !== targetColumnId);
@@ -300,6 +333,7 @@ export const reorderCard = (
   const nextIndex = Math.max(0, Math.min(targetIndex, targetCards.length));
   const movedCard: KanbanCard = {
     ...card,
+    ...prepared.updates,
     columnId: targetColumnId,
     activityLog:
       card.columnId === targetColumnId
@@ -427,12 +461,17 @@ export const applyReviewAction = (
       if (card.id !== cardId) {
         return card;
       }
+      const targetColumnId =
+        action === "approve" ? "done" : action === "request-changes" ? "my-plan" : action === "retry" ? "start-implement" : card.columnId;
+      const prepared = prepareCardForColumn(workspace, card, targetColumnId);
 
       return {
         ...card,
-        columnId: action === "approve" ? "done" : action === "request-changes" ? "my-plan" : action === "retry" ? "start-implement" : card.columnId,
+        ...prepared.updates,
+        columnId: targetColumnId,
         activeSessionId: action === "approve" || action === "request-changes" ? undefined : card.activeSessionId,
         rejectCount: action === "request-changes" ? card.rejectCount + 1 : card.rejectCount,
+        implementationCompletedAt: action === "approve" ? card.implementationCompletedAt || timestamp : card.implementationCompletedAt,
         sessions: updateLatestReviewableSession(card, action),
         reviewChecklist:
           action === "approve"
@@ -569,6 +608,7 @@ export const completePlanOnlyExecution = (
             ...card,
             columnId: "in-review",
             locked: false,
+            implementationCompletedAt: timestamp,
             resultSummary: result.summary,
             diffPlaceholder: result.rawText,
             patchText: card.executionMode === "Suggest Patch" ? result.rawText : card.patchText,
@@ -648,6 +688,7 @@ export const completeCliExecution = (
             ...card,
             columnId: "in-review",
             locked: false,
+            implementationCompletedAt: timestamp,
             resultSummary: result.summary,
             diffPlaceholder: result.rawText,
             patchText: card.executionMode === "Suggest Patch" ? result.rawText : card.patchText,
@@ -848,6 +889,51 @@ const logsForMove = (card: KanbanCard, targetColumnId: BoardColumnId, workspace:
   return [createLogEntry(`Moved to ${targetColumnId}`)];
 };
 
+const prepareCardForColumn = (
+  workspace: Workspace,
+  card: KanbanCard,
+  targetColumnId: BoardColumnId
+): { updates: Partial<KanbanCard>; warning?: string } => {
+  if (targetColumnId === "my-plan") {
+    const planAgent = resolvePlanAgent(workspace, card.planAgentProfileId || card.agentProfileId);
+    if (!planAgent) {
+      return { updates: {}, warning: "No Plan Agent is configured." };
+    }
+    return {
+      updates: {
+        agentProfileId: planAgent.id,
+        planAgentProfileId: planAgent.id,
+        skillIds: planAgent.skillIds,
+        runnerType: planAgent.defaultRunnerType,
+        modelProfileId: planAgent.defaultModelProfileId || workspace.defaultModelProfileId,
+        cliToolProfileId: planAgent.defaultCliToolProfileId || workspace.defaultCliToolProfileId || undefined,
+        executionMode: "Plan Only"
+      }
+    };
+  }
+
+  if (targetColumnId === "start-implement") {
+    const implementAgent = resolveImplementAgent(workspace, card.implementAgentProfileId);
+    if (!implementAgent) {
+      return { updates: {}, warning: "No Implement Agent is configured." };
+    }
+    return {
+      updates: {
+        agentProfileId: implementAgent.id,
+        implementAgentProfileId: implementAgent.id,
+        skillIds: implementAgent.skillIds,
+        runnerType: implementAgent.defaultRunnerType,
+        modelProfileId: implementAgent.defaultModelProfileId || workspace.defaultModelProfileId,
+        cliToolProfileId: implementAgent.defaultCliToolProfileId || workspace.defaultCliToolProfileId || undefined,
+        executionMode: implementAgent.defaultExecutionMode,
+        planCompletedAt: card.planCompletedAt || nowIso()
+      }
+    };
+  }
+
+  return { updates: {} };
+};
+
 const startImplementationSession = (
   workspace: Workspace,
   cardId: string,
@@ -866,6 +952,14 @@ const startImplementationSession = (
     };
   }
 
+  const implementAgent = workspace.agentProfiles.find((agent) => agent.id === (card.implementAgentProfileId || card.agentProfileId));
+  if (!implementAgent || !supportsImplementMode(implementAgent)) {
+    return {
+      workspace: appendCardLog(workspace, cardId, "No Implement Agent is configured.", "warning"),
+      warning: "No Implement Agent is configured."
+    };
+  }
+
   const blockedDependency = card.dependencyCardIds
     .map((dependencyId) => workspace.cards.find((item) => item.id === dependencyId))
     .find((dependency) => dependency && dependency.columnId !== "done");
@@ -878,10 +972,21 @@ const startImplementationSession = (
   }
 
   const timestamp = nowIso();
+  const implementationCard = {
+    ...card,
+    agentProfileId: implementAgent.id,
+    implementAgentProfileId: implementAgent.id
+  };
   const model = workspace.modelProfiles.find((profile) => profile.id === card.modelProfileId);
   const cliTool = workspace.cliToolProfiles.find((profile) => profile.id === card.cliToolProfileId);
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
-  const session = createImplementationSession(card, workspace, buildExecutionPreview(card, model, skills, cliTool), retryMode, initialLogs);
+  const session = createImplementationSession(
+    implementationCard,
+    workspace,
+    buildExecutionPreview(implementationCard, model, skills, cliTool),
+    retryMode,
+    initialLogs
+  );
 
   return {
     workspace: {
@@ -892,6 +997,9 @@ const startImplementationSession = (
               ...item,
               columnId: "in-process",
               locked: true,
+              agentProfileId: implementAgent.id,
+              implementAgentProfileId: implementAgent.id,
+              implementationStartedAt: timestamp,
               activeSessionId: session.id,
               sessions: [...item.sessions, session],
               activityLog: [...item.activityLog, ...initialLogs],
@@ -923,7 +1031,7 @@ const createImplementationSession = (
     attemptNumber,
     status: "running",
     retryMode,
-    selectedAgentProfileId: card.agentProfileId,
+    selectedAgentProfileId: card.implementAgentProfileId || card.agentProfileId,
     runnerType: card.runnerType,
     modelProfileId: card.modelProfileId,
     cliToolProfileId: card.cliToolProfileId || workspace.defaultCliToolProfileId || undefined,

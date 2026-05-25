@@ -34,7 +34,9 @@ export const KanbanCardItem = ({
   onStartCard
 }: KanbanCardItemProps) => {
   const [, setNow] = useState(Date.now());
-  const agent = workspace.agentProfiles.find((profile) => profile.id === card.agentProfileId);
+  const agent = workspace.agentProfiles.find((profile) =>
+    profile.id === (card.columnId === "my-plan" ? card.planAgentProfileId || card.agentProfileId : card.implementAgentProfileId || card.agentProfileId)
+  );
   const latestSession = card.sessions.find((session) => session.id === card.activeSessionId) ?? card.sessions.at(-1);
   const columnTitle = BOARD_COLUMNS.find((column) => column.id === card.columnId)?.title ?? "Workflow";
   const isGeneratingPlan = card.columnId === "my-plan" && card.locked;
@@ -99,11 +101,13 @@ export const KanbanCardItem = ({
     if (card.columnId === "in-process") {
       const elapsed = formatElapsed(latestSession);
       const liveStatus = latestSession?.logs.at(-1)?.message || "Session is running";
+      const currentFile = latestSession ? currentFileLabel(latestSession) : "";
       return (
         <>
           <div className="cli-status-card">
             <span>Running: {latestSession?.currentStep || "Preparing session"}</span>
             <span>{latestSession?.status === "failed" ? "Failed" : truncate(liveStatus, 72)}</span>
+            {currentFile ? <span>File: {truncate(currentFile, 72)}</span> : null}
             <span>Elapsed: {elapsed}</span>
             <span>Tokens: {formatTokens(latestSession)}{latestSession?.usageWasEstimated ? " est." : ""}</span>
             <span>Cost: {formatCost(latestSession)}</span>
@@ -276,6 +280,14 @@ const formatCost = (session: ImplementationSession | undefined) => {
     return "$0.00";
   }
   return `~$${cost.toFixed(cost < 0.01 ? 4 : 2)}`;
+};
+
+const currentFileLabel = (session: ImplementationSession) => {
+  if (session.changedFiles[0]) {
+    return session.changedFiles[0];
+  }
+  const text = [session.currentStep, session.logs.at(-1)?.message ?? ""].join(" ");
+  return text.match(/[A-Za-z0-9_\-./\\]+\.(?:ts|tsx|js|jsx|json|css|scss|md|cjs|mjs|cs|py|html|yml|yaml)/)?.[0] ?? "";
 };
 
 const changedFileCount = (session: ImplementationSession | undefined, card: KanbanCard) => {

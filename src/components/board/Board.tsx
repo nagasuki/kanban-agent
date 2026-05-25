@@ -1,5 +1,6 @@
 import { Play, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
+import { getImplementCapableAgents, getPlanCapableAgents } from "../../domain/agentCapabilities";
 import { BOARD_COLUMNS } from "../../domain/constants";
 import { canUserCreateCard } from "../../domain/boardService";
 import type { BoardColumnId, Workspace } from "../../domain/types";
@@ -13,9 +14,11 @@ interface BoardProps {
   filterStatus: string;
   searchQuery: string;
   selectedCardId: string | null;
+  onOpenSettings?: () => void;
   onCancelCard: (cardId: string) => void;
   onSelectCard: (cardId: string) => void;
   onCreateCard: (columnId: BoardColumnId) => void;
+  onColumnAgentChange: (columnId: "my-plan" | "start-implement", agentId: string) => void;
   onMoveCard: (cardId: string, targetColumnId: BoardColumnId) => void;
   onReorderCard: (cardId: string, targetColumnId: BoardColumnId, targetIndex: number) => void;
   onReviewAction: (cardId: string, action: "approve" | "request-changes") => void;
@@ -31,9 +34,11 @@ export const Board = ({
   filterStatus,
   searchQuery,
   selectedCardId,
+  onOpenSettings,
   onCancelCard,
   onSelectCard,
   onCreateCard,
+  onColumnAgentChange,
   onMoveCard,
   onReorderCard,
   onReviewAction,
@@ -76,6 +81,12 @@ export const Board = ({
     const matchesStatus = !filterStatus || card.columnId === filterStatus;
     return matchesQuery && matchesSkill && matchesModel && matchesStatus;
   });
+  const planAgents = getPlanCapableAgents(workspace);
+  const implementAgents = getImplementCapableAgents(workspace);
+  const selectedPlanAgentId =
+    planAgents.find((agent) => agent.id === workspace.defaultPlanAgentProfileId)?.id ?? planAgents[0]?.id ?? "";
+  const selectedImplementAgentId =
+    implementAgents.find((agent) => agent.id === workspace.defaultImplementAgentProfileId)?.id ?? implementAgents[0]?.id ?? "";
 
   return (
     <section
@@ -137,16 +148,68 @@ export const Board = ({
             {canUserCreateCard(column.id) ? (
               <div className="column-action-row">
                 {column.id === "my-plan" ? (
-                  <button className="column-add" type="button" onClick={() => onCreateCard(column.id)}>
+                  <>
+                  <label className="column-agent-selector">
+                    <span>Planner</span>
+                    <select
+                      value={selectedPlanAgentId}
+                      onChange={(event) => onColumnAgentChange("my-plan", event.target.value)}
+                    >
+                      <option value="">No Plan Agent</option>
+                      {planAgents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="column-add" disabled={planAgents.length === 0} type="button" onClick={() => onCreateCard(column.id)}>
                     <Plus size={16} />
                     New plan
                   </button>
+                  {planAgents.length === 0 ? (
+                    <div className="column-warning">
+                      No Plan Agent is configured. Please set up a Plan Agent first.
+                      {onOpenSettings ? (
+                        <button type="button" onClick={onOpenSettings}>
+                          Open Settings
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  </>
                 ) : null}
                 {column.id === "start-implement" ? (
-                  <button className="column-add primary" disabled={cards.length === 0} type="button" onClick={onStartImplementAll}>
+                  <>
+                  <label className="column-agent-selector">
+                    <span>Programmer</span>
+                    <select
+                      value={selectedImplementAgentId}
+                      onChange={(event) => onColumnAgentChange("start-implement", event.target.value)}
+                    >
+                      <option value="">No Implement Agent</option>
+                      {implementAgents.map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="column-add primary" disabled={cards.length === 0 || implementAgents.length === 0} type="button" onClick={onStartImplementAll}>
                     <Play size={16} />
                     Start Implement All
                   </button>
+                  {implementAgents.length === 0 ? (
+                    <div className="column-warning">
+                      No Implement Agent is configured. Please set up an Implement Agent first.
+                      {onOpenSettings ? (
+                        <button type="button" onClick={onOpenSettings}>
+                          Open Settings
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  </>
                 ) : null}
               </div>
             ) : (

@@ -6,6 +6,7 @@ import {
   createDefaultValidationRules
 } from "../domain/defaults";
 import { createId, nowIso } from "../domain/id";
+import { resolveImplementAgent, resolvePlanAgent } from "../domain/agentCapabilities";
 import type { AppState, BoardColumnId, CliToolProfile, ImplementationSession, KanbanCard } from "../domain/types";
 
 const STORAGE_KEY = "kanban-agent.state.v1";
@@ -41,12 +42,27 @@ const normalizeAppState = (state: AppState): AppState => ({
         ? workspace.cliToolProfiles
         : createDefaultCliToolProfiles();
 
-    return {
+    const agentProfiles = workspace.agentProfiles.map((agent) => ({
+      ...agent,
+      mode: agent.mode ?? "both",
+      defaultRunnerType:
+        agent.defaultRunnerType ?? (agent.defaultCliToolProfileId || workspace.defaultCliToolProfileId ? "cli" : "api"),
+      defaultModelProfileId: agent.defaultModelProfileId ?? workspace.defaultModelProfileId ?? workspace.modelProfiles[0]?.id ?? "",
+      defaultCliToolProfileId: agent.defaultCliToolProfileId ?? workspace.defaultCliToolProfileId ?? cliToolProfiles[0]?.id ?? "",
+      defaultExecutionMode: agent.defaultExecutionMode ?? "Suggest Patch"
+    }));
+    const defaultAgentProfileId = workspace.defaultAgentProfileId ?? "";
+    const defaultPlanAgentProfileId = workspace.defaultPlanAgentProfileId ?? defaultAgentProfileId;
+    const defaultImplementAgentProfileId = workspace.defaultImplementAgentProfileId ?? defaultAgentProfileId;
+    const normalizedWorkspace = {
       ...workspace,
       repoPath: workspace.repoPath ?? "",
       versionControlProvider: workspace.versionControlProvider ?? "auto",
       defaultBranch: workspace.defaultBranch ?? "main",
       defaultModelProfileId: workspace.defaultModelProfileId ?? workspace.modelProfiles[0]?.id ?? "",
+      defaultAgentProfileId,
+      defaultPlanAgentProfileId,
+      defaultImplementAgentProfileId,
       defaultCliToolProfileId: workspace.defaultCliToolProfileId || cliToolProfiles[0]?.id || "",
       allowedEditableFolders: workspace.allowedEditableFolders ?? "",
       blockedFilePatterns: workspace.blockedFilePatterns ?? ".env, *.pem, *.key",
@@ -66,16 +82,13 @@ const normalizeAppState = (state: AppState): AppState => ({
         version: skill.version ?? "0.1.0"
       })),
       cliToolProfiles: cliToolProfiles.map(normalizeCliToolProfile),
-      agentProfiles: workspace.agentProfiles.map((agent) => ({
-        ...agent,
-        defaultRunnerType:
-          agent.defaultRunnerType ?? (agent.defaultCliToolProfileId || workspace.defaultCliToolProfileId ? "cli" : "api"),
-        defaultModelProfileId: agent.defaultModelProfileId ?? workspace.defaultModelProfileId ?? workspace.modelProfiles[0]?.id ?? "",
-        defaultCliToolProfileId: agent.defaultCliToolProfileId ?? workspace.defaultCliToolProfileId ?? cliToolProfiles[0]?.id ?? "",
-        defaultExecutionMode: agent.defaultExecutionMode ?? "Suggest Patch"
-      })),
+      agentProfiles,
       providerUsageRecords: workspace.providerUsageRecords ?? [],
-      cards: workspace.cards.map((card) => normalizeCard(card, workspace, cliToolProfiles))
+      cards: []
+    };
+    return {
+      ...normalizedWorkspace,
+      cards: workspace.cards.map((card) => normalizeCard(card, normalizedWorkspace, cliToolProfiles))
     };
   })
 });
@@ -91,6 +104,9 @@ const normalizeCard = (card: KanbanCard, workspace: AppState["workspaces"][numbe
     columnId: normalizedColumnId,
     runnerType: card.runnerType ?? (card.cliToolProfileId ? "cli" : "api"),
     modelProfileId: card.modelProfileId ?? workspace.defaultModelProfileId ?? workspace.modelProfiles[0]?.id ?? "",
+    planAgentProfileId: card.planAgentProfileId ?? card.agentProfileId ?? resolvePlanAgent(workspace)?.id,
+    implementAgentProfileId: card.implementAgentProfileId ?? card.agentProfileId ?? resolveImplementAgent(workspace)?.id,
+    agentProfileId: card.agentProfileId ?? card.implementAgentProfileId ?? card.planAgentProfileId,
     cliToolProfileId: card.cliToolProfileId ?? workspace.defaultCliToolProfileId ?? cliToolProfiles[0]?.id,
     priority: card.priority ?? "Normal",
     dependencyCardIds: card.dependencyCardIds ?? [],
@@ -107,6 +123,9 @@ const normalizeCard = (card: KanbanCard, workspace: AppState["workspaces"][numbe
     prDescription: card.prDescription ?? "",
     prUrl: card.prUrl ?? "",
     locked: card.locked ?? false,
+    planCompletedAt: card.planCompletedAt,
+    implementationStartedAt: card.implementationStartedAt,
+    implementationCompletedAt: card.implementationCompletedAt,
     safetySettings: {
       ...createDefaultSafetySettings(),
       ...card.safetySettings,
@@ -194,7 +213,7 @@ const createLegacySessions = (card: KanbanCard): ImplementationSession[] => {
       attemptNumber: 1,
       status,
       retryMode: "fresh",
-      selectedAgentProfileId: card.agentProfileId,
+      selectedAgentProfileId: card.implementAgentProfileId ?? card.agentProfileId,
       runnerType: card.runnerType,
       modelProfileId: card.modelProfileId,
       cliToolProfileId: card.cliToolProfileId,

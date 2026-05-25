@@ -19,6 +19,15 @@ export const AgentEditor = ({ agent, workspace, onUpdate, onDelete }: AgentEdito
         </button>
       </div>
 
+      <label>
+        Agent mode
+        <select value={agent.mode} onChange={(event) => onUpdate({ mode: event.target.value as AgentProfile["mode"] })}>
+          <option value="both">Plan and Implement</option>
+          <option value="plan">Plan Mode only</option>
+          <option value="implement">Implement only</option>
+        </select>
+      </label>
+
       <div className="checkbox-list">
         {workspace.skills.map((skill) => (
           <label className="checkbox-row" key={skill.id}>

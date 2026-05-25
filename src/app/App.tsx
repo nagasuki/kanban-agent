@@ -9,6 +9,14 @@ import { runCliAgent, runCliPlanDraft } from "../agent/cliRunner";
 import { cliBridge, type CliValidationResult } from "../desktop/cliBridge";
 import { repoBridge } from "../desktop/repoBridge";
 import { createAgentProfile, deleteAgentProfile, updateAgentProfile } from "../domain/agentService";
+import {
+  getImplementCapableAgents,
+  getPlanCapableAgents,
+  resolveImplementAgent,
+  resolveImplementAgentForCard,
+  resolvePlanAgent,
+  supportsImplementMode
+} from "../domain/agentCapabilities";
 import { createCliToolProfile, deleteCliToolProfile, updateCliToolProfile } from "../domain/cliToolService";
 import { createDefaultCliToolProfiles } from "../domain/defaults";
 import {
@@ -120,6 +128,8 @@ export const App = () => {
       defaultBranch: "main",
       defaultModelProfileId: "",
       defaultAgentProfileId: "",
+      defaultPlanAgentProfileId: "",
+      defaultImplementAgentProfileId: "",
       defaultCliToolProfileId: cliToolProfiles[0]?.id ?? "",
       allowedEditableFolders: "",
       blockedFilePatterns: ".env, *.pem, *.key",
@@ -180,8 +190,57 @@ export const App = () => {
     return null;
   }
 
+  const selectedPlanColumnAgentId =
+    getPlanCapableAgents(activeWorkspace).find((agent) => agent.id === activeWorkspace.defaultPlanAgentProfileId)?.id ??
+    getPlanCapableAgents(activeWorkspace)[0]?.id ??
+    "";
+  const selectedImplementColumnAgentId =
+    getImplementCapableAgents(activeWorkspace).find((agent) => agent.id === activeWorkspace.defaultImplementAgentProfileId)?.id ??
+    getImplementCapableAgents(activeWorkspace)[0]?.id ??
+    "";
+
+  const handleColumnAgentChange = (columnId: "my-plan" | "start-implement", agentId: string) => {
+    if (columnId === "my-plan") {
+      const agent = resolvePlanAgent(activeWorkspace, agentId);
+      if (!agent) {
+        setWarning("No Plan Agent is configured. Please set up a Plan Agent first.");
+        return;
+      }
+      updateActiveWorkspace((workspace) => ({ ...workspace, defaultPlanAgentProfileId: agent.id, updatedAt: nowIso() }));
+      return;
+    }
+
+    const agent = resolveImplementAgent(activeWorkspace, agentId);
+    if (!agent) {
+      setWarning("No Implement Agent is configured. Please set up an Implement Agent first.");
+      return;
+    }
+    updateActiveWorkspace((workspace) => ({ ...workspace, defaultImplementAgentProfileId: agent.id, updatedAt: nowIso() }));
+  };
+
   const handleMoveCard = (cardId: string, targetColumnId: BoardColumnId) => {
-    const result = moveCard(activeWorkspace, cardId, targetColumnId);
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+    let workspaceForMove = activeWorkspace;
+    if (targetColumnId === "start-implement") {
+      const implementAgent = resolveImplementAgentForCard(card, activeWorkspace, selectedImplementColumnAgentId);
+      if (!implementAgent) {
+        setWarning("No Implement Agent is configured. Please set up an Implement Agent first.");
+        return;
+      }
+      workspaceForMove = updateCard(activeWorkspace, cardId, { implementAgentProfileId: implementAgent.id });
+    }
+    if (targetColumnId === "my-plan") {
+      const planAgent = resolvePlanAgent(activeWorkspace, card.planAgentProfileId || selectedPlanColumnAgentId);
+      if (!planAgent) {
+        setWarning("No Plan Agent is configured. Please set up a Plan Agent first.");
+        return;
+      }
+      workspaceForMove = updateCard(activeWorkspace, cardId, { planAgentProfileId: planAgent.id });
+    }
+    const result = moveCard(workspaceForMove, cardId, targetColumnId);
     setWarning(result.warning ?? null);
     setState((current) => ({
       ...current,
@@ -192,7 +251,28 @@ export const App = () => {
   };
 
   const handleReorderCard = (cardId: string, targetColumnId: BoardColumnId, targetIndex: number) => {
-    const result = reorderCard(activeWorkspace, cardId, targetColumnId, targetIndex);
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+    let workspaceForMove = activeWorkspace;
+    if (targetColumnId === "start-implement") {
+      const implementAgent = resolveImplementAgentForCard(card, activeWorkspace, selectedImplementColumnAgentId);
+      if (!implementAgent) {
+        setWarning("No Implement Agent is configured. Please set up an Implement Agent first.");
+        return;
+      }
+      workspaceForMove = updateCard(activeWorkspace, cardId, { implementAgentProfileId: implementAgent.id });
+    }
+    if (targetColumnId === "my-plan") {
+      const planAgent = resolvePlanAgent(activeWorkspace, card.planAgentProfileId || selectedPlanColumnAgentId);
+      if (!planAgent) {
+        setWarning("No Plan Agent is configured. Please set up a Plan Agent first.");
+        return;
+      }
+      workspaceForMove = updateCard(activeWorkspace, cardId, { planAgentProfileId: planAgent.id });
+    }
+    const result = reorderCard(workspaceForMove, cardId, targetColumnId, targetIndex);
     setWarning(result.warning ?? null);
     setState((current) => ({
       ...current,
@@ -204,6 +284,10 @@ export const App = () => {
 
   const handleCreateCard = (columnId: BoardColumnId) => {
     if (columnId === "my-plan") {
+      if (!selectedPlanColumnAgentId) {
+        setWarning("No Plan Agent is configured. Please set up a Plan Agent first.");
+        return;
+      }
       setPlanPromptOpen(true);
       return;
     }
@@ -399,12 +483,26 @@ export const App = () => {
     if (!card) {
       return;
     }
-    if (card.runnerType !== "api") {
-      setWarning("This card is set to CLI Agent. Switch runner to API Model before running an API model.");
+    const implementAgent = resolveImplementAgentForCard(card, activeWorkspace, selectedImplementColumnAgentId);
+    if (!supportsImplementMode(implementAgent)) {
+      setWarning("No Implement Agent is configured. Please set up an Implement Agent first.");
+      return;
+    }
+    if (implementAgent.defaultRunnerType !== "api") {
+      setWarning("The selected Implement Agent is configured for CLI. Use the CLI runner for this card.");
       return;
     }
 
-    const started = startPlanOnlyExecution(activeWorkspace, cardId, retryMode);
+    const workspaceForRun = updateCard(activeWorkspace, cardId, {
+      agentProfileId: implementAgent.id,
+      implementAgentProfileId: implementAgent.id,
+      skillIds: implementAgent.skillIds,
+      runnerType: implementAgent.defaultRunnerType,
+      modelProfileId: implementAgent.defaultModelProfileId || activeWorkspace.defaultModelProfileId,
+      cliToolProfileId: implementAgent.defaultCliToolProfileId || activeWorkspace.defaultCliToolProfileId || undefined,
+      executionMode: implementAgent.defaultExecutionMode
+    });
+    const started = startPlanOnlyExecution(workspaceForRun, cardId, retryMode);
     setWarning(started.warning ?? null);
     if (started.warning) {
       setState((current) => ({
@@ -422,7 +520,8 @@ export const App = () => {
       )
     }));
 
-    const result = await runPlanOnly(started.workspace, card, (message) => {
+    const runningCard = started.workspace.cards.find((item) => item.id === cardId) ?? card;
+    const result = await runPlanOnly(started.workspace, runningCard, (message) => {
       setState((current) => ({
         ...current,
         workspaces: current.workspaces.map((workspace) =>
@@ -497,20 +596,35 @@ export const App = () => {
       setWarning("This card is locked by a running task.");
       return;
     }
-    if (card.runnerType !== "cli") {
-      setWarning("This card is set to API Model. Switch runner to CLI Agent before running Claude Code / Codex.");
+    const implementAgent = resolveImplementAgentForCard(card, activeWorkspace, selectedImplementColumnAgentId);
+    if (!supportsImplementMode(implementAgent)) {
+      setWarning("No Implement Agent is configured. Please set up an Implement Agent first.");
+      return;
+    }
+    if (implementAgent.defaultRunnerType !== "cli") {
+      setWarning("The selected Implement Agent is configured for API Model. Use the API runner for this card.");
       return;
     }
 
-    const profile = activeWorkspace.cliToolProfiles.find(
-      (item) => item.id === (card.cliToolProfileId || activeWorkspace.defaultCliToolProfileId)
+    const workspaceForRun = updateCard(activeWorkspace, cardId, {
+      agentProfileId: implementAgent.id,
+      implementAgentProfileId: implementAgent.id,
+      skillIds: implementAgent.skillIds,
+      runnerType: implementAgent.defaultRunnerType,
+      modelProfileId: implementAgent.defaultModelProfileId || activeWorkspace.defaultModelProfileId,
+      cliToolProfileId: implementAgent.defaultCliToolProfileId || activeWorkspace.defaultCliToolProfileId || undefined,
+      executionMode: implementAgent.defaultExecutionMode
+    });
+    const runCard = workspaceForRun.cards.find((item) => item.id === cardId) ?? card;
+    const profile = workspaceForRun.cliToolProfiles.find(
+      (item) => item.id === (runCard.cliToolProfileId || workspaceForRun.defaultCliToolProfileId)
     );
     if (!profile) {
       setWarning("Select a CLI profile before running Claude Code / Codex.");
       return;
     }
 
-    const started = startCliExecution(activeWorkspace, cardId, retryMode);
+    const started = startCliExecution(workspaceForRun, cardId, retryMode);
     setWarning(started.warning ?? null);
     if (started.warning) {
       setState((current) => ({
@@ -528,7 +642,8 @@ export const App = () => {
       )
     }));
 
-    const result = await runCliAgent(started.workspace, card, profile, (message, usage) => {
+    const runningCard = started.workspace.cards.find((item) => item.id === cardId) ?? card;
+    const result = await runCliAgent(started.workspace, runningCard, profile, (message, usage) => {
       setState((current) => ({
         ...current,
         workspaces: current.workspaces.map((workspace) => {
@@ -641,8 +756,13 @@ export const App = () => {
     if (!card) {
       return;
     }
+    const implementAgent = resolveImplementAgentForCard(card, activeWorkspace, selectedImplementColumnAgentId);
+    if (!implementAgent) {
+      setWarning("No Implement Agent is configured. Please set up an Implement Agent first.");
+      return;
+    }
 
-    if (card.runnerType === "cli") {
+    if (implementAgent.defaultRunnerType === "cli") {
       void handleRunCliAgent(cardId);
       return;
     }
@@ -650,14 +770,63 @@ export const App = () => {
     void handleRunPlanOnly(cardId);
   };
 
+  const handleSendToImplement = (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+    const implementAgent = resolveImplementAgentForCard(card, activeWorkspace, selectedImplementColumnAgentId);
+    if (!implementAgent) {
+      setWarning("No Implement Agent is configured. Please set up an Implement Agent first.");
+      return;
+    }
+    const workspaceWithAgent = updateCard(activeWorkspace, cardId, {
+      implementAgentProfileId: implementAgent.id
+    });
+    const result = moveCard(workspaceWithAgent, cardId, "start-implement");
+    setWarning(result.warning ?? null);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? result.workspace : workspace
+      )
+    }));
+  };
+
+  const handleBackToPlan = (cardId: string) => {
+    const result = moveCard(activeWorkspace, cardId, "my-plan");
+    setWarning(result.warning ?? null);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? result.workspace : workspace
+      )
+    }));
+  };
+
   const runImplementationFromWorkspace = async (workspace: Workspace, cardId: string): Promise<Workspace> => {
     const card = workspace.cards.find((item) => item.id === cardId);
     if (!card) {
       return workspace;
     }
+    const implementAgent = resolveImplementAgentForCard(card, workspace, selectedImplementColumnAgentId);
+    if (!implementAgent) {
+      setWarning("No Implement Agent is configured. Please set up an Implement Agent first.");
+      return appendCardLog(workspace, cardId, "Queued implementation skipped: no Implement Agent configured", "warning");
+    }
+    const workspaceForRun = updateCard(workspace, cardId, {
+      agentProfileId: implementAgent.id,
+      implementAgentProfileId: implementAgent.id,
+      skillIds: implementAgent.skillIds,
+      runnerType: implementAgent.defaultRunnerType,
+      modelProfileId: implementAgent.defaultModelProfileId || workspace.defaultModelProfileId,
+      cliToolProfileId: implementAgent.defaultCliToolProfileId || workspace.defaultCliToolProfileId || undefined,
+      executionMode: implementAgent.defaultExecutionMode
+    });
+    const runCard = workspaceForRun.cards.find((item) => item.id === cardId) ?? card;
 
-    if (card.runnerType === "api") {
-      const started = startPlanOnlyExecution(workspace, cardId, "fresh");
+    if (implementAgent.defaultRunnerType === "api") {
+      const started = startPlanOnlyExecution(workspaceForRun, cardId, "fresh");
       setWarning(started.warning ?? null);
       if (started.warning) {
         return started.workspace;
@@ -671,7 +840,8 @@ export const App = () => {
         )
       }));
 
-      const result = await runPlanOnly(runningWorkspace, card, (message) => {
+      const runningCard = runningWorkspace.cards.find((item) => item.id === cardId) ?? runCard;
+      const result = await runPlanOnly(runningWorkspace, runningCard, (message) => {
         runningWorkspace = appendCardLog(runningWorkspace, cardId, message);
         setState((current) => ({
           ...current,
@@ -688,15 +858,15 @@ export const App = () => {
       return completePlanOnlyExecution(runningWorkspace, cardId, result);
     }
 
-    const profile = workspace.cliToolProfiles.find(
-      (item) => item.id === (card.cliToolProfileId || workspace.defaultCliToolProfileId)
+    const profile = workspaceForRun.cliToolProfiles.find(
+      (item) => item.id === (runCard.cliToolProfileId || workspaceForRun.defaultCliToolProfileId)
     );
     if (!profile) {
       setWarning(`Select a CLI profile before running ${card.title}.`);
       return appendCardLog(workspace, cardId, "Queued implementation skipped: no CLI profile selected", "warning");
     }
 
-    const started = startCliExecution(workspace, cardId, "fresh");
+    const started = startCliExecution(workspaceForRun, cardId, "fresh");
     setWarning(started.warning ?? null);
     if (started.warning) {
       return started.workspace;
@@ -709,7 +879,8 @@ export const App = () => {
       )
     }));
 
-    const result = await runCliAgent(started.workspace, card, profile, (message, usage) => {
+    const runningCard = started.workspace.cards.find((item) => item.id === cardId) ?? runCard;
+    const result = await runCliAgent(started.workspace, runningCard, profile, (message, usage) => {
       setState((current) => ({
         ...current,
         workspaces: current.workspaces.map((item) => {
@@ -1009,9 +1180,11 @@ export const App = () => {
           filterStatus={filterStatus}
           searchQuery={searchQuery}
           selectedCardId={selectedCardId}
+          onOpenSettings={() => setSettingsOpen(true)}
           onCancelCard={handleCancelExecution}
           onSelectCard={handleSelectCard}
           onCreateCard={handleCreateCard}
+          onColumnAgentChange={handleColumnAgentChange}
           onMoveCard={handleMoveCard}
           onReorderCard={handleReorderCard}
           onReviewAction={handleReviewAction}
@@ -1031,6 +1204,8 @@ export const App = () => {
         }
         onDeleteCard={handleDeleteCard}
         onDuplicateCard={handleDuplicateCard}
+        onSendToImplement={handleSendToImplement}
+        onBackToPlan={handleBackToPlan}
         onReviewAction={handleReviewAction}
         onSimulateExecution={(cardId) =>
           updateActiveWorkspace((workspace) => {

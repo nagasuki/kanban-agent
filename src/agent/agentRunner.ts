@@ -20,7 +20,7 @@ export const runPlanOnly = async (
   }
 
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
-  const agent = workspace.agentProfiles.find((profile) => profile.id === card.agentProfileId);
+  const agent = workspace.agentProfiles.find((profile) => profile.id === (card.implementAgentProfileId || card.agentProfileId));
   const cliTool = workspace.cliToolProfiles.find((profile) => profile.id === card.cliToolProfileId);
   const prompt = buildAgentPrompt(card, workspace, model, skills, agent, cliTool);
   const apiKeyResult = await secureKeyStore.get(secureKeyStore.keyForModel(model.id));
@@ -63,7 +63,7 @@ export const runPlanDraft = async (
   }
 
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
-  const agent = workspace.agentProfiles.find((profile) => profile.id === card.agentProfileId);
+  const agent = workspace.agentProfiles.find((profile) => profile.id === (card.planAgentProfileId || card.agentProfileId));
   const cliTool = workspace.cliToolProfiles.find((profile) => profile.id === card.cliToolProfileId);
   const prompt = buildPlanDraftPrompt(card, workspace, model, skills, agent, cliTool);
   const apiKeyResult = await secureKeyStore.get(secureKeyStore.keyForModel(model.id));

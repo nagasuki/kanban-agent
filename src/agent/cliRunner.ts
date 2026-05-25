@@ -33,7 +33,7 @@ export const runCliAgent = async (
 ): Promise<CliAgentResult> => {
   const model = workspace.modelProfiles.find((item) => item.id === card.modelProfileId);
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
-  const agent = workspace.agentProfiles.find((item) => item.id === card.agentProfileId);
+  const agent = workspace.agentProfiles.find((item) => item.id === (card.implementAgentProfileId || card.agentProfileId));
   const prompt = buildAgentPrompt(card, workspace, model, skills, agent, profile);
   const cwd = card.projectContext.repoPath || workspace.repoPath;
   const cliPrompt = [
@@ -126,7 +126,7 @@ export const runCliPlanDraft = async (
 ): Promise<CliAgentResult> => {
   const model = workspace.modelProfiles.find((item) => item.id === card.modelProfileId);
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
-  const agent = workspace.agentProfiles.find((item) => item.id === card.agentProfileId);
+  const agent = workspace.agentProfiles.find((item) => item.id === (card.planAgentProfileId || card.agentProfileId));
   const prompt = buildPlanDraftPrompt(card, workspace, model, skills, agent, profile);
   const cwd = card.projectContext.repoPath || workspace.repoPath;
   const cliPrompt = [

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Play, X } from "lucide-react";
 import type { CreatePlanCardOptions } from "../../domain/boardService";
+import { planAgentsForWorkspace } from "../../domain/agentCapabilities";
 import type { Workspace } from "../../domain/types";
 
 interface PlanPromptModalProps {
@@ -12,17 +13,18 @@ interface PlanPromptModalProps {
 }
 
 export const PlanPromptModal = ({ isGenerating, onClose, onManualSubmit, onSubmit, workspace }: PlanPromptModalProps) => {
-  const defaultAgent = workspace.agentProfiles.find((profile) => profile.id === workspace.defaultAgentProfileId);
+  const planAgents = planAgentsForWorkspace(workspace);
+  const defaultAgent = planAgents.find((profile) => profile.id === workspace.defaultPlanAgentProfileId) ?? planAgents[0];
   const [prompt, setPrompt] = useState("");
   const [agentProfileId, setAgentProfileId] = useState(defaultAgent?.id || "");
-  const selectedAgent = workspace.agentProfiles.find((profile) => profile.id === agentProfileId);
+  const selectedAgent = planAgents.find((profile) => profile.id === (agentProfileId || defaultAgent?.id));
   const runnerType = selectedAgent?.defaultRunnerType ?? (workspace.defaultCliToolProfileId ? "cli" : "api");
   const modelProfileId = selectedAgent?.defaultModelProfileId || workspace.defaultModelProfileId || workspace.modelProfiles[0]?.id || "";
   const cliToolProfileId = selectedAgent?.defaultCliToolProfileId || workspace.defaultCliToolProfileId || workspace.cliToolProfiles[0]?.id || "";
   const selectedModel = workspace.modelProfiles.find((model) => model.id === modelProfileId);
   const selectedCliTool = workspace.cliToolProfiles.find((profile) => profile.id === cliToolProfileId);
   const selectedOptions: CreatePlanCardOptions = {
-    agentProfileId: agentProfileId || undefined,
+    agentProfileId: agentProfileId || defaultAgent?.id || undefined,
     runnerType,
     modelProfileId,
     cliToolProfileId: cliToolProfileId || undefined
@@ -62,8 +64,8 @@ export const PlanPromptModal = ({ isGenerating, onClose, onManualSubmit, onSubmi
                 value={agentProfileId}
                 onChange={(event) => setAgentProfileId(event.target.value)}
               >
-                <option value="">Use workspace defaults</option>
-                {workspace.agentProfiles.map((agent) => (
+                <option value="">Use workspace Default Plan Agent</option>
+                {planAgents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
                     {agent.name}
                   </option>
@@ -97,7 +99,7 @@ export const PlanPromptModal = ({ isGenerating, onClose, onManualSubmit, onSubmi
             <button disabled={isGenerating || !prompt.trim()} type="button" onClick={() => onManualSubmit(prompt, selectedOptions)}>
               Manual Plan
             </button>
-            <button disabled={isGenerating || !prompt.trim() || (runnerType === "api" ? !modelProfileId : !cliToolProfileId)} type="submit">
+            <button disabled={isGenerating || !prompt.trim() || !selectedAgent || (runnerType === "api" ? !modelProfileId : !cliToolProfileId)} type="submit">
               <Play size={15} />
               {isGenerating ? "Generating plan..." : "Generate Plan Card"}
             </button>

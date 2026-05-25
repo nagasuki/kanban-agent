@@ -16,10 +16,14 @@ export const buildAgentPrompt = (
 ): GeneratedPrompt => {
   const skillMarkdown = skills.length > 0 ? skills.map(formatSkillMarkdown).join("\n\n") : "No skill preset selected.";
   const safetyInstructions = buildSafetyInstructions(card, workspace);
+  const agentRole = card.columnId === "my-plan" || card.executionMode === "Plan Only" ? "planning" : "implementation";
 
   const systemPrompt = [
-    "You are an implementation planning agent controlled by kanban-agent.",
-    "The user remains in control. Do not edit files, run commands, commit, or open pull requests unless the execution mode explicitly allows it and the user has approved the action.",
+    `You are a ${agentRole} agent controlled by kanban-agent.`,
+    agentRole === "planning"
+      ? "Plan Mode only: do not edit files, apply patches, run implementation commands, commit, or open pull requests."
+      : "Implementation Mode: make only the requested changes, produce reviewable diff output, and respect all approval gates.",
+    "The user remains in control. Do not commit or open pull requests unless the execution mode explicitly allows it and the user has approved the action.",
     agent ? `Agent profile: ${agent.name}` : "Agent profile: none selected",
     agent?.notes ? `Agent notes: ${agent.notes}` : "",
     "",

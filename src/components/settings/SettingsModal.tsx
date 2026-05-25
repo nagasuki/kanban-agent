@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { CliValidationResult } from "../../desktop/cliBridge";
 import type { ThemeMode } from "../../app/theme";
 import { aggregateUsageRecords, usageForProvider } from "../../domain/providerUsageService";
+import { implementAgentsForWorkspace, planAgentsForWorkspace } from "../../domain/agentCapabilities";
 import type { AgentProfile, AppState, CliToolProfile, ModelProfile, ProviderUsageRecord, SkillPreset, Workspace } from "../../domain/types";
 import { AgentEditor } from "../agents/AgentEditor";
 import { CliToolEditor } from "../cli/CliToolEditor";
@@ -138,6 +139,8 @@ const WorkspaceSettings = ({
     activeWorkspace.repoInspection?.branches.includes(activeWorkspace.defaultBranch)
       ? activeWorkspace.repoInspection.branches
       : [activeWorkspace.defaultBranch, ...(activeWorkspace.repoInspection?.branches ?? [])].filter(Boolean);
+  const planAgents = planAgentsForWorkspace(activeWorkspace);
+  const implementAgents = implementAgentsForWorkspace(activeWorkspace);
 
   return (
   <>
@@ -254,13 +257,27 @@ const WorkspaceSettings = ({
         </select>
       </label>
       <label>
-        Default agent
+        Default Plan Agent
         <select
-          value={activeWorkspace.defaultAgentProfileId}
-          onChange={(event) => onUpdateWorkspace({ defaultAgentProfileId: event.target.value })}
+          value={activeWorkspace.defaultPlanAgentProfileId}
+          onChange={(event) => onUpdateWorkspace({ defaultPlanAgentProfileId: event.target.value })}
         >
-          <option value="">No default agent</option>
-          {activeWorkspace.agentProfiles.map((agent) => (
+          <option value="">No default Plan Agent</option>
+          {planAgents.map((agent) => (
+            <option key={agent.id} value={agent.id}>
+              {agent.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Default Implement Agent
+        <select
+          value={activeWorkspace.defaultImplementAgentProfileId}
+          onChange={(event) => onUpdateWorkspace({ defaultImplementAgentProfileId: event.target.value })}
+        >
+          <option value="">No default Implement Agent</option>
+          {implementAgents.map((agent) => (
             <option key={agent.id} value={agent.id}>
               {agent.name}
             </option>

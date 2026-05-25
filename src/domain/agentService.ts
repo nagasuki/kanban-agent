@@ -6,6 +6,7 @@ export const createAgentProfile = (workspace: Workspace): Workspace => {
   const agent: AgentProfile = {
     id: createId("agent"),
     name: "New Agent Profile",
+    mode: "both",
     skillIds: workspace.skills[0] ? [workspace.skills[0].id] : [],
     defaultRunnerType: workspace.defaultCliToolProfileId ? "cli" : "api",
     defaultModelProfileId: workspace.defaultModelProfileId,
@@ -19,6 +20,8 @@ export const createAgentProfile = (workspace: Workspace): Workspace => {
   return {
     ...workspace,
     defaultAgentProfileId: workspace.defaultAgentProfileId || agent.id,
+    defaultPlanAgentProfileId: workspace.defaultPlanAgentProfileId || agent.id,
+    defaultImplementAgentProfileId: workspace.defaultImplementAgentProfileId || agent.id,
     agentProfiles: [agent, ...workspace.agentProfiles],
     updatedAt: timestamp
   };
@@ -52,10 +55,15 @@ export const deleteAgentProfile = (workspace: Workspace, agentId: string): Works
   return {
     ...workspace,
     defaultAgentProfileId: workspace.defaultAgentProfileId === agentId ? fallbackAgentId : workspace.defaultAgentProfileId,
+    defaultPlanAgentProfileId: workspace.defaultPlanAgentProfileId === agentId ? fallbackAgentId : workspace.defaultPlanAgentProfileId,
+    defaultImplementAgentProfileId:
+      workspace.defaultImplementAgentProfileId === agentId ? fallbackAgentId : workspace.defaultImplementAgentProfileId,
     agentProfiles: remainingAgents,
     cards: workspace.cards.map((card) => ({
       ...card,
-      agentProfileId: card.agentProfileId === agentId ? undefined : card.agentProfileId
+      agentProfileId: card.agentProfileId === agentId ? undefined : card.agentProfileId,
+      planAgentProfileId: card.planAgentProfileId === agentId ? undefined : card.planAgentProfileId,
+      implementAgentProfileId: card.implementAgentProfileId === agentId ? undefined : card.implementAgentProfileId
     })),
     updatedAt: nowIso()
   };

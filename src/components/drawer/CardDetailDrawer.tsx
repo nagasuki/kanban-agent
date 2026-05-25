@@ -3,6 +3,7 @@ import { Copy, Play, RotateCcw, ShieldCheck, Trash2, Undo2, X } from "lucide-rea
 import { BOARD_COLUMNS, EXECUTION_MODES, TASK_PRIORITIES } from "../../domain/constants";
 import { buildExecutionPreview } from "../../domain/executionService";
 import { buildAgentPrompt } from "../../domain/promptBuilder";
+import { implementAgentsForWorkspace, planAgentsForWorkspace } from "../../domain/agentCapabilities";
 import type { KanbanCard, SessionRetryMode, Workspace } from "../../domain/types";
 import { DiffViewer } from "../diff/DiffViewer";
 import { FileTreePicker } from "./FileTreePicker";
@@ -14,6 +15,8 @@ interface CardDetailModalProps {
   onUpdateCard: (cardId: string, updates: Partial<KanbanCard>) => void;
   onDeleteCard: (cardId: string) => void;
   onDuplicateCard: (cardId: string) => void;
+  onSendToImplement: (cardId: string) => void;
+  onBackToPlan: (cardId: string) => void;
   onReviewAction: (cardId: string, action: "approve" | "request-changes" | "retry" | "rollback") => void;
   onSimulateExecution: (cardId: string) => void;
   onCancelExecution: (cardId: string) => void;
@@ -53,6 +56,8 @@ export const CardDetailModal = ({
   onUpdateCard,
   onDeleteCard,
   onDuplicateCard,
+  onSendToImplement,
+  onBackToPlan,
   onReviewAction,
   onSimulateExecution,
   onCancelExecution,
@@ -85,7 +90,11 @@ export const CardDetailModal = ({
     return null;
   }
 
-  const selectedAgent = workspace.agentProfiles.find((agent) => agent.id === card.agentProfileId);
+  const planAgents = planAgentsForWorkspace(workspace);
+  const implementAgents = implementAgentsForWorkspace(workspace);
+  const selectedPlanAgent = workspace.agentProfiles.find((agent) => agent.id === (card.planAgentProfileId || card.agentProfileId));
+  const selectedImplementAgent = workspace.agentProfiles.find((agent) => agent.id === (card.implementAgentProfileId || card.agentProfileId));
+  const selectedAgent = card.columnId === "my-plan" ? selectedPlanAgent : selectedImplementAgent;
   const selectedSkillIds = selectedAgent?.skillIds ?? card.skillIds;
   const selectedSkills = workspace.skills.filter((skill) => selectedSkillIds.includes(skill.id));
   const selectedModel = workspace.modelProfiles.find((model) => model.id === card.modelProfileId);
@@ -98,26 +107,48 @@ export const CardDetailModal = ({
   const latestSession = activeSession ?? card.sessions.at(-1);
   const canStartSession = card.columnId === "start-implement";
   const startSession = (retryMode: SessionRetryMode = "fresh") => {
-    if (card.runnerType === "cli") {
+    const runnerType = selectedImplementAgent?.defaultRunnerType ?? card.runnerType;
+    if (runnerType === "cli") {
       onRunCliAgent(card.id, retryMode);
       return;
     }
     onRunPlanOnly(card.id, retryMode);
   };
-  const applyAgentProfile = (agentId: string) => {
+  const applyAgentProfile = (agentId: string, role: "plan" | "implement") => {
     const agent = workspace.agentProfiles.find((profile) => profile.id === agentId);
+    if (role === "plan") {
+      onUpdateCard(
+        card.id,
+        agent
+          ? {
+              agentProfileId: agent.id,
+              planAgentProfileId: agent.id,
+              skillIds: agent.skillIds,
+              runnerType: agent.defaultRunnerType,
+              modelProfileId: agent.defaultModelProfileId,
+              cliToolProfileId: agent.defaultCliToolProfileId || undefined,
+              executionMode: "Plan Only"
+            }
+          : { planAgentProfileId: undefined }
+      );
+      return;
+    }
+
     onUpdateCard(
       card.id,
       agent
-        ? {
-            agentProfileId: agent.id,
-            skillIds: agent.skillIds,
-            runnerType: agent.defaultRunnerType,
-            modelProfileId: agent.defaultModelProfileId,
-            cliToolProfileId: agent.defaultCliToolProfileId || undefined,
-            executionMode: agent.defaultExecutionMode
-          }
-        : { agentProfileId: undefined }
+        ? card.columnId === "my-plan"
+          ? { implementAgentProfileId: agent.id }
+          : {
+              agentProfileId: agent.id,
+              implementAgentProfileId: agent.id,
+              skillIds: agent.skillIds,
+              runnerType: agent.defaultRunnerType,
+              modelProfileId: agent.defaultModelProfileId,
+              cliToolProfileId: agent.defaultCliToolProfileId || undefined,
+              executionMode: agent.defaultExecutionMode
+            }
+        : { implementAgentProfileId: undefined }
     );
   };
   const attachFile = (path: string) => {
@@ -155,6 +186,18 @@ export const CardDetailModal = ({
 
       <div className="detail-modal-body">
       <div className="drawer-actions">
+        {card.columnId === "my-plan" && !card.locked ? (
+          <button type="button" onClick={() => onSendToImplement(card.id)}>
+            <Play size={15} />
+            Send to Implement
+          </button>
+        ) : null}
+        {card.columnId === "start-implement" ? (
+          <button type="button" onClick={() => onBackToPlan(card.id)}>
+            <Undo2 size={15} />
+            Back to Plan
+          </button>
+        ) : null}
         {canStartSession ? (
           <button type="button" onClick={() => startSession("fresh")}>
             <Play size={15} />
@@ -180,18 +223,18 @@ export const CardDetailModal = ({
           </>
         ) : null}
         {card.locked ? <span className="status-pill warning-text">Locked</span> : null}
-        <button type="button" onClick={() => onApplyPatch(card.id)}>
-          <Play size={15} />
-          Apply Patch
-        </button>
-        <button type="button" onClick={() => onDuplicateCard(card.id)}>
-          <Copy size={15} />
-          Duplicate
-        </button>
+        {card.columnId === "in-process" && latestSession?.logs.length ? (
+          <button type="button" onClick={() => document.getElementById(`logs-${card.id}`)?.scrollIntoView({ behavior: "smooth" })}>
+            <Copy size={15} />
+            Open Logs
+          </button>
+        ) : null}
+        {card.columnId === "my-plan" || card.columnId === "done" ? (
         <button className="danger-text-button" type="button" onClick={() => onDeleteCard(card.id)}>
           <Trash2 size={15} />
           Delete
         </button>
+        ) : null}
       </div>
 
       <section className="drawer-section">
@@ -209,28 +252,51 @@ export const CardDetailModal = ({
         </label>
       </section>
 
-      <section className="drawer-section">
+      <section className="drawer-section" id={`logs-${card.id}`}>
         <h3>Agent Context</h3>
+        {card.columnId === "my-plan" ? (
         <label>
-          Agent profile
+          Plan Agent
           <select
-            value={card.agentProfileId ?? ""}
-            onChange={(event) => applyAgentProfile(event.target.value)}
+            value={card.planAgentProfileId ?? card.agentProfileId ?? ""}
+            onChange={(event) => applyAgentProfile(event.target.value, "plan")}
           >
-            <option value="">No agent selected</option>
-            {workspace.agentProfiles.map((agent) => (
+            <option value="">No Plan Agent selected</option>
+            {planAgents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.name}
               </option>
             ))}
           </select>
         </label>
+        ) : null}
+
+        {card.columnId === "my-plan" || card.columnId === "start-implement" || card.columnId === "in-process" ? (
+        <label>
+          Implement Agent
+          <select
+            value={card.implementAgentProfileId ?? ""}
+            onChange={(event) => applyAgentProfile(event.target.value, "implement")}
+          >
+            <option value="">No Implement Agent selected</option>
+            {implementAgents.map((agent) => (
+              <option key={agent.id} value={agent.id}>
+                {agent.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        ) : null}
 
         <div className="repo-meta-row">
+          {card.columnId === "my-plan" ? <span>Plan Agent: {selectedPlanAgent?.name ?? "Not selected"}</span> : null}
+          {card.columnId !== "my-plan" ? <span>Implement Agent: {selectedImplementAgent?.name ?? "Not selected"}</span> : null}
           <span>Skills: {selectedSkills.length > 0 ? selectedSkills.map((skill) => skill.name).join(", ") : "No agent skills"}</span>
           {card.rejectCount > 0 ? <span className="warning-text">{card.rejectCount} rejects</span> : null}
         </div>
 
+        {card.columnId !== "my-plan" ? (
+        <>
         <label>
           Runner
           <select
@@ -271,6 +337,8 @@ export const CardDetailModal = ({
               ))}
             </select>
           </label>
+        ) : null}
+        </>
         ) : null}
 
         <label>
@@ -541,6 +609,7 @@ export const CardDetailModal = ({
             <span>{latestSession.status}</span>
             <span>{latestSession.retryMode === "continue" ? "Continue" : "Fresh"}</span>
             <span>{latestSession.currentStep}</span>
+            <span>Current file: {currentFileLabel(latestSession) || "Unknown"}</span>
             <span>{latestSession.durationSeconds}s</span>
             <span>{latestSession.tokenUsage.totalTokens} tokens</span>
             <span>${latestSession.tokenUsage.costUsd.toFixed(4)}</span>
@@ -576,11 +645,14 @@ export const CardDetailModal = ({
         </section>
       ) : null}
 
+      {card.columnId !== "done" ? (
       <section className="drawer-section preview-panel">
         <h3>Final Prompt Preview</h3>
         <pre>{generatedPrompt.finalPromptPreview}</pre>
       </section>
+      ) : null}
 
+      {card.columnId === "in-review" ? (
       <section className="drawer-section">
         <h3>Review</h3>
         <div className="checkbox-list">
@@ -616,6 +688,7 @@ export const CardDetailModal = ({
           </div>
         ) : null}
       </section>
+      ) : null}
 
       <section className="drawer-section">
         <h3>Result</h3>
@@ -623,6 +696,7 @@ export const CardDetailModal = ({
           Summary
           <textarea
             rows={4}
+            readOnly={card.columnId === "done"}
             value={latestSession?.summary || card.resultSummary}
             onChange={(event) => onUpdateCard(card.id, { resultSummary: event.target.value })}
           />
@@ -631,37 +705,14 @@ export const CardDetailModal = ({
           Patch text
           <textarea
             rows={6}
+            readOnly={card.columnId === "done"}
             value={card.patchText || latestSession?.diffText || card.diffPlaceholder}
             onChange={(event) => onUpdateCard(card.id, { patchText: event.target.value })}
           />
         </label>
         <DiffViewer value={card.patchText || latestSession?.diffText || card.diffPlaceholder} />
-        <div className="review-actions">
-          <button type="button" onClick={() => onRunWorkspaceCommand(card.id, "test")}>
-            <Play size={15} />
-            Run Test
-          </button>
-          <button type="button" onClick={() => onRunWorkspaceCommand(card.id, "build")}>
-            <Play size={15} />
-            Run Build
-          </button>
-          <button type="button" onClick={() => onCommit(card.id)}>
-            <Play size={15} />
-          Commit
-          </button>
-          <button type="button" onClick={() => onGeneratePrDraft(card.id)}>
-            <Play size={15} />
-            Draft PR
-          </button>
-          <button type="button" onClick={() => onCreatePr(card.id)}>
-            <Play size={15} />
-            Create PR
-          </button>
-          <button type="button" onClick={() => onRollbackFiles(card.id)}>
-            <Undo2 size={15} />
-            Rollback Files
-          </button>
-        </div>
+        {card.columnId === "in-review" ? (
+        <>
         <label>
           Commit message
           <input value={card.commitMessage} onChange={(event) => onUpdateCard(card.id, { commitMessage: event.target.value })} />
@@ -678,6 +729,10 @@ export const CardDetailModal = ({
             onChange={(event) => onUpdateCard(card.id, { prDescription: event.target.value })}
           />
         </label>
+        </>
+        ) : null}
+        {card.columnId === "in-review" ? (
+        <>
         <label>
           PR URL
           <input value={card.prUrl} onChange={(event) => onUpdateCard(card.id, { prUrl: event.target.value })} />
@@ -706,6 +761,8 @@ export const CardDetailModal = ({
             onChange={(event) => onUpdateCard(card.id, { applyOutput: event.target.value })}
           />
         </label>
+        </>
+        ) : null}
       </section>
 
       <section className="drawer-section">
@@ -783,4 +840,12 @@ const formatTokensPerMinute = (tokens: number, durationSeconds: number) => {
     return "0";
   }
   return formatUsageTokens(Math.round(tokens / (durationSeconds / 60)));
+};
+
+const currentFileLabel = (session: { changedFiles: string[]; currentStep: string; logs: Array<{ message: string }> }) => {
+  if (session.changedFiles[0]) {
+    return session.changedFiles[0];
+  }
+  const text = [session.currentStep, session.logs.at(-1)?.message ?? ""].join(" ");
+  return text.match(/[A-Za-z0-9_\-./\\]+\.(?:ts|tsx|js|jsx|json|css|scss|md|cjs|mjs|cs|py|html|yml|yaml)/)?.[0] ?? "";
 };

@@ -146,6 +146,8 @@ export const createSeedState = (): AppState => {
     defaultBranch: "main",
     defaultModelProfileId: models[0].id,
     defaultAgentProfileId: agentProfileId,
+    defaultPlanAgentProfileId: agentProfileId,
+    defaultImplementAgentProfileId: agentProfileId,
     defaultCliToolProfileId: cliProfiles[0].id,
     allowedEditableFolders: "src, electron, docs",
     blockedFilePatterns: ".env, *.pem, *.key, secrets.*",
@@ -159,6 +161,7 @@ export const createSeedState = (): AppState => {
       {
         id: agentProfileId,
         name: "Implementation Agent",
+        mode: "both",
         skillIds: [skills[1].id],
         defaultRunnerType: "cli",
         defaultModelProfileId: models[0].id,
@@ -226,6 +229,8 @@ const createSeedCard = (input: {
     runnerType: input.runnerType,
     modelProfileId: input.modelProfileId,
     agentProfileId: undefined,
+    planAgentProfileId: undefined,
+    implementAgentProfileId: undefined,
     cliToolProfileId: undefined,
     executionMode: "Suggest Patch",
     priority: "Normal",
@@ -258,6 +263,9 @@ const createSeedCard = (input: {
     prDescription: "",
     prUrl: "",
     locked: false,
+    planCompletedAt: input.columnId !== "my-plan" ? timestamp : undefined,
+    implementationStartedAt: input.columnId === "in-process" || input.columnId === "in-review" || input.columnId === "done" ? timestamp : undefined,
+    implementationCompletedAt: input.columnId === "in-review" || input.columnId === "done" ? timestamp : undefined,
     createdAt: timestamp,
     updatedAt: timestamp
   };

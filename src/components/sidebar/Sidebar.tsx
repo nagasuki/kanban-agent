@@ -1,5 +1,6 @@
 import { Database, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { implementAgentsForWorkspace, planAgentsForWorkspace } from "../../domain/agentCapabilities";
 import type { AgentProfile, AppState, CliToolProfile, ModelProfile, SkillPreset, Workspace } from "../../domain/types";
 import { AgentEditor } from "../agents/AgentEditor";
 import { CliToolEditor } from "../cli/CliToolEditor";
@@ -61,6 +62,8 @@ export const Sidebar = ({
   onDeleteAgent
 }: SidebarProps) => {
   const [tab, setTab] = useState<SidebarTab>("workspace");
+  const planAgents = planAgentsForWorkspace(activeWorkspace);
+  const implementAgents = implementAgentsForWorkspace(activeWorkspace);
 
   return (
     <aside className="sidebar">
@@ -193,13 +196,27 @@ export const Sidebar = ({
             </select>
           </label>
           <label>
-            Default agent
+            Default Plan Agent
             <select
-              value={activeWorkspace.defaultAgentProfileId}
-              onChange={(event) => onUpdateWorkspace({ defaultAgentProfileId: event.target.value })}
+              value={activeWorkspace.defaultPlanAgentProfileId}
+              onChange={(event) => onUpdateWorkspace({ defaultPlanAgentProfileId: event.target.value })}
             >
-              <option value="">No default agent</option>
-              {activeWorkspace.agentProfiles.map((agent) => (
+              <option value="">No default Plan Agent</option>
+              {planAgents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Default Implement Agent
+            <select
+              value={activeWorkspace.defaultImplementAgentProfileId}
+              onChange={(event) => onUpdateWorkspace({ defaultImplementAgentProfileId: event.target.value })}
+            >
+              <option value="">No default Implement Agent</option>
+              {implementAgents.map((agent) => (
                 <option key={agent.id} value={agent.id}>
                   {agent.name}
                 </option>

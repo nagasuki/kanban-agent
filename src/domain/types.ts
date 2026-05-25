@@ -13,6 +13,7 @@ export type ModelProvider = "OpenAI" | "Anthropic" | "Google" | "Local" | "Custo
 export type CliToolProvider = "Claude Code" | "Codex" | "Custom CLI";
 
 export type AgentRunnerType = "api" | "cli";
+export type AgentProfileMode = "plan" | "implement" | "both";
 
 export type WorkspaceVersionControlProvider = "auto" | "git" | "plastic";
 
@@ -191,6 +192,7 @@ export interface SkillPreset {
 export interface AgentProfile {
   id: string;
   name: string;
+  mode: AgentProfileMode;
   skillIds: string[];
   defaultRunnerType: AgentRunnerType;
   defaultModelProfileId: string;
@@ -241,6 +243,8 @@ export interface KanbanCard {
   runnerType: AgentRunnerType;
   modelProfileId: string;
   agentProfileId?: string;
+  planAgentProfileId?: string;
+  implementAgentProfileId?: string;
   cliToolProfileId?: string;
   executionMode: ExecutionMode;
   priority: TaskPriority;
@@ -264,6 +268,9 @@ export interface KanbanCard {
   prDescription: string;
   prUrl: string;
   locked: boolean;
+  planCompletedAt?: string;
+  implementationStartedAt?: string;
+  implementationCompletedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -276,6 +283,8 @@ export interface Workspace {
   defaultBranch: string;
   defaultModelProfileId: string;
   defaultAgentProfileId: string;
+  defaultPlanAgentProfileId: string;
+  defaultImplementAgentProfileId: string;
   defaultCliToolProfileId: string;
   allowedEditableFolders: string;
   blockedFilePatterns: string;
