@@ -137,6 +137,14 @@ export interface ImplementationSession {
   updatedAt: string;
 }
 
+export interface AgentChoiceQuestion {
+  id: string;
+  question: string;
+  choices: string[];
+  rawText: string;
+  askedAt: string;
+}
+
 export interface ActivityLogEntry {
   id: string;
   message: string;
@@ -225,6 +233,7 @@ export interface CliToolProfile {
   command: string;
   args: string;
   timeoutSeconds: number;
+  keepStdinOpen?: boolean;
   environmentVariables?: string;
   workingDirectory?: string;
   resolvedExecutablePath?: string;
@@ -268,6 +277,7 @@ export interface KanbanCard {
   prDescription: string;
   prUrl: string;
   locked: boolean;
+  pendingAgentQuestion?: AgentChoiceQuestion;
   planCompletedAt?: string;
   implementationStartedAt?: string;
   implementationCompletedAt?: string;

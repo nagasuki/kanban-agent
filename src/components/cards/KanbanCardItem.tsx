@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import { useEffect, useState } from "react";
-import { CheckCircle2, Play, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Play, ShieldCheck, XCircle } from "lucide-react";
 import { BOARD_COLUMNS } from "../../domain/constants";
 import type { ImplementationSession, KanbanCard, Workspace } from "../../domain/types";
 
@@ -102,8 +102,19 @@ export const KanbanCardItem = ({
       const elapsed = formatElapsed(latestSession);
       const liveStatus = latestSession?.logs.at(-1)?.message || "Session is running";
       const currentFile = latestSession ? currentFileLabel(latestSession) : "";
+      const pendingQuestion = card.pendingAgentQuestion;
       return (
         <>
+          {pendingQuestion ? (
+            <div className="agent-question-card">
+              <span>
+                <AlertTriangle size={13} />
+                Needs your answer
+              </span>
+              <p>{truncate(pendingQuestion.question, 120)}</p>
+              <small>Open this card to choose an answer.</small>
+            </div>
+          ) : null}
           <div className="cli-status-card">
             <span>Running: {latestSession?.currentStep || "Preparing session"}</span>
             <span>{latestSession?.status === "failed" ? "Failed" : truncate(liveStatus, 72)}</span>
@@ -229,7 +240,9 @@ export const KanbanCardItem = ({
         {card.reviewChecklist.userApproved ? <CheckCircle2 className="success-icon" size={16} /> : null}
       </div>
       {renderBody()}
-      <div className="open-detail-hint">{isGeneratingPlan ? "Generating plan. Cancel or wait." : "Click to open details"}</div>
+      <div className="open-detail-hint">
+        {isGeneratingPlan ? "Generating plan. Cancel or wait." : card.pendingAgentQuestion ? "Open card to answer" : "Click to open details"}
+      </div>
     </article>
   );
 };

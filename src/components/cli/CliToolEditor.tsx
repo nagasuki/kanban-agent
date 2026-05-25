@@ -108,6 +108,15 @@ export const CliToolEditor = ({ profile, onDelete, onTest, onUpdate, usageStats 
         </label>
       </div>
 
+      <label className="checkbox-row">
+        <input
+          checked={Boolean(profile.keepStdinOpen)}
+          type="checkbox"
+          onChange={(event) => onUpdate({ keepStdinOpen: event.target.checked })}
+        />
+        Keep stdin open for live choice answers
+      </label>
+
       <label>
         Resolved executable path
         <input

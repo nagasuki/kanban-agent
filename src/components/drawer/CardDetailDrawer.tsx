@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Copy, Play, RotateCcw, ShieldCheck, Trash2, Undo2, X } from "lucide-react";
+import { AlertTriangle, Copy, Play, RotateCcw, Send, ShieldCheck, Trash2, Undo2, X } from "lucide-react";
 import { BOARD_COLUMNS, EXECUTION_MODES, TASK_PRIORITIES } from "../../domain/constants";
 import { buildExecutionPreview } from "../../domain/executionService";
 import { buildAgentPrompt } from "../../domain/promptBuilder";
@@ -20,6 +20,7 @@ interface CardDetailModalProps {
   onReviewAction: (cardId: string, action: "approve" | "request-changes" | "retry" | "rollback") => void;
   onSimulateExecution: (cardId: string) => void;
   onCancelExecution: (cardId: string) => void;
+  onAnswerAgentQuestion: (cardId: string, answer: string) => void;
   onRunPlanOnly: (cardId: string, retryMode?: SessionRetryMode) => void;
   onLoadAttachedFiles: (cardId: string) => void;
   onRunCliAgent: (cardId: string, retryMode?: SessionRetryMode) => void;
@@ -61,6 +62,7 @@ export const CardDetailModal = ({
   onReviewAction,
   onSimulateExecution,
   onCancelExecution,
+  onAnswerAgentQuestion,
   onRunPlanOnly,
   onLoadAttachedFiles,
   onRunCliAgent,
@@ -236,6 +238,24 @@ export const CardDetailModal = ({
         </button>
         ) : null}
       </div>
+
+      {card.columnId === "in-process" && card.pendingAgentQuestion ? (
+        <section className="drawer-section agent-question-panel">
+          <h3>
+            <AlertTriangle size={16} />
+            Agent Question
+          </h3>
+          <p>{card.pendingAgentQuestion.question}</p>
+          <div className="agent-choice-list">
+            {card.pendingAgentQuestion.choices.map((choice, index) => (
+              <button key={`${choice}-${index}`} type="button" onClick={() => onAnswerAgentQuestion(card.id, choice)}>
+                <Send size={14} />
+                {choice}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="drawer-section">
         <label>

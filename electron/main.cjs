@@ -1594,7 +1594,9 @@ const runProviderProcess = (options) =>
     if (options.stdin) {
       child.stdin.write(options.stdin);
     }
-    child.stdin.end();
+    if (!options.keepStdinOpen) {
+      child.stdin.end();
+    }
   });
 
 const runCommand = (command, args, cwd, stdin, timeoutMs) =>
@@ -1607,6 +1609,23 @@ const cancelProviderProcess = (runId) => {
   }
   child.kill();
   return { ok: true, message: "CLI process cancellation requested." };
+};
+
+const sendProviderInput = (runId, input) => {
+  const child = activeProviderProcesses.get(runId);
+  if (!child) {
+    return { ok: false, message: "No running CLI process was found for this session." };
+  }
+  if (!child.stdin || child.stdin.destroyed || child.stdin.writableEnded) {
+    return { ok: false, message: "This CLI process is not accepting live input." };
+  }
+
+  try {
+    child.stdin.write(String(input || "").endsWith("\n") ? String(input || "") : `${String(input || "")}\n`);
+    return { ok: true, message: "Choice answer sent to the CLI process." };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Could not send input to the CLI process." };
+  }
 };
 
 const collectVersion = async (options, cwd) => {
@@ -1731,6 +1750,7 @@ const registerCliHandlers = () => {
       timeoutMs,
       runId: String(options.runId || ""),
       environmentVariables: options.environmentVariables,
+      keepStdinOpen: Boolean(options.keepStdinOpen),
       resolvedExecutablePath: options.resolvedExecutablePath,
       onStdout: (chunk) => {
         stdout = trimOutput(stdout + chunk);
@@ -1746,6 +1766,10 @@ const registerCliHandlers = () => {
       stderr: stderr || result.stderr
     };
   });
+
+  ipcMain.handle("cli:input", async (_event, options) =>
+    sendProviderInput(String(options.runId || ""), String(options.input || ""))
+  );
 
   ipcMain.handle("cli:cancel", async (_event, options) => cancelProviderProcess(String(options.runId || "")));
 
