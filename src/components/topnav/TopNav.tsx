@@ -15,6 +15,7 @@ export const TopNav = ({ activeWorkspace, onOpenSettings }: TopNavProps) => {
     latestVersion: "",
     updateAvailable: false,
     downloadUrl: "",
+    installerUrl: "",
     message: "Update check has not run yet."
   });
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -25,7 +26,7 @@ export const TopNav = ({ activeWorkspace, onOpenSettings }: TopNavProps) => {
     }
     setCheckingUpdate(true);
     try {
-      setUpdateInfo(await window.kanbanAgent.updates.check());
+      setUpdateInfo(await window.kanbanAgent.updates.check({ prompt: true }));
     } finally {
       setCheckingUpdate(false);
     }
@@ -43,7 +44,7 @@ export const TopNav = ({ activeWorkspace, onOpenSettings }: TopNavProps) => {
       }
       const checkedRecently = info.checkedAt && Date.now() - new Date(info.checkedAt).getTime() < 10_000;
       if (!checkedRecently) {
-        const checked = await window.kanbanAgent.updates.check();
+        const checked = await window.kanbanAgent.updates.check({ prompt: true });
         if (mounted) {
           setUpdateInfo(checked);
         }

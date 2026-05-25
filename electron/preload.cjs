@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld("kanbanAgent", {
   },
   updates: {
     getInfo: () => ipcRenderer.invoke("updates:get-info"),
-    check: () => ipcRenderer.invoke("updates:check")
+    check: (options) => ipcRenderer.invoke("updates:check", options)
   },
   repo: {
     selectFolder: () => ipcRenderer.invoke("repo:select-folder"),

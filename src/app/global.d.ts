@@ -17,14 +17,16 @@ declare global {
           latestVersion: string;
           updateAvailable: boolean;
           downloadUrl: string;
+          installerUrl: string;
           message: string;
         }>;
-        check: () => Promise<{
+        check: (options?: { prompt?: boolean }) => Promise<{
           checkedAt: string;
           currentVersion: string;
           latestVersion: string;
           updateAvailable: boolean;
           downloadUrl: string;
+          installerUrl: string;
           message: string;
         }>;
       };

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell } = require("electron");
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
@@ -73,33 +73,173 @@ const resolveGitHubReleasesUrl = () => {
   return repo ? `https://api.github.com/repos/${repo}/releases/latest` : "";
 };
 
+const resolveGitHubReleasePageUrl = () => {
+  const repo = resolveGitHubRepo();
+  return repo ? `https://github.com/${repo}/releases/latest` : "";
+};
+
 let lastUpdateCheck = {
   checkedAt: "",
   currentVersion: app.getVersion(),
   latestVersion: "",
   updateAvailable: false,
   downloadUrl: "",
+  installerUrl: "",
   message: "Update check has not run yet."
+};
+
+const installerExtensionsForPlatform = () => {
+  if (process.platform === "win32") return [".msi", ".exe"];
+  if (process.platform === "darwin") return [".dmg", ".zip"];
+  return [".appimage", ".deb", ".rpm", ".tar.gz"];
+};
+
+const selectInstallerAsset = (assets = []) => {
+  const extensions = installerExtensionsForPlatform();
+  const archHints = process.arch === "x64" ? ["x64", "amd64", "win"] : [process.arch];
+  const candidates = assets
+    .map((asset) => ({
+      name: String(asset.name || ""),
+      url: asset.browser_download_url || asset.url || ""
+    }))
+    .filter((asset) => asset.name && asset.url)
+    .filter((asset) => extensions.some((extension) => asset.name.toLowerCase().endsWith(extension)));
+
+  return (
+    candidates.find((asset) => archHints.some((hint) => asset.name.toLowerCase().includes(hint))) ||
+    candidates[0] ||
+    null
+  );
 };
 
 const normalizeUpdatePayload = (payload) => {
   if (Array.isArray(payload)) {
     const release = payload.find((item) => !item.draft && !item.prerelease) || payload[0] || {};
+    const installer = selectInstallerAsset(release.assets || []);
     return {
       version: release.tag_name || release.name || release.version || "",
       downloadUrl: release.html_url || release.assets?.[0]?.browser_download_url || "",
+      installerUrl: installer?.url || "",
       notes: release.body || ""
     };
   }
 
+  const installer = selectInstallerAsset(payload.assets || []);
   return {
     version: payload.version || payload.latestVersion || payload.tag_name || payload.name || "",
     downloadUrl: payload.url || payload.downloadUrl || payload.html_url || payload.assets?.[0]?.browser_download_url || "",
+    installerUrl: payload.installerUrl || installer?.url || "",
     notes: payload.notes || payload.body || ""
   };
 };
 
-const checkForAppUpdate = async () => {
+const safeUpdateFilename = (url, version) => {
+  const rawName = decodeURIComponent(String(url || "").split("?")[0].split("/").pop() || `kanban-agent-${version}`);
+  return rawName.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
+};
+
+const downloadUpdateInstaller = async (updateInfo) => {
+  if (!updateInfo.installerUrl) {
+    throw new Error("No installable release asset was found for this platform.");
+  }
+
+  const response = await fetch(updateInfo.installerUrl, {
+    headers: {
+      Accept: "application/octet-stream",
+      "User-Agent": "kanban-agent-update-checker"
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Installer download failed with HTTP ${response.status}.`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const updateDir = path.join(app.getPath("temp"), "kanban-agent-updates");
+  fs.mkdirSync(updateDir, { recursive: true });
+  const installerPath = path.join(updateDir, safeUpdateFilename(updateInfo.installerUrl, updateInfo.latestVersion));
+  fs.writeFileSync(installerPath, Buffer.from(arrayBuffer));
+  return installerPath;
+};
+
+const launchInstaller = (installerPath) => {
+  const extension = path.extname(installerPath).toLowerCase();
+  if (process.platform === "win32" && extension === ".msi") {
+    const child = spawn("msiexec.exe", ["/i", installerPath], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false
+    });
+    child.unref();
+    app.quit();
+    return;
+  }
+
+  if (process.platform === "win32" && extension === ".exe") {
+    const child = spawn(installerPath, [], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false
+    });
+    child.unref();
+    app.quit();
+    return;
+  }
+
+  void shell.openPath(installerPath);
+};
+
+const promptForAppUpdate = async (updateInfo) => {
+  if (!updateInfo.updateAvailable) {
+    return updateInfo;
+  }
+
+  const targetUrl = updateInfo.downloadUrl || resolveGitHubReleasePageUrl();
+  const result = await dialog.showMessageBox(BrowserWindow.getFocusedWindow() || undefined, {
+    type: "info",
+    buttons: updateInfo.installerUrl ? ["Download and Install", "Open Release", "Later"] : ["Open Release", "Later"],
+    defaultId: 0,
+    cancelId: updateInfo.installerUrl ? 2 : 1,
+    title: "Kanban Agent update available",
+    message: `Kanban Agent ${updateInfo.latestVersion} is available.`,
+    detail: [
+      `Current version: ${updateInfo.currentVersion}`,
+      `Latest version: ${updateInfo.latestVersion}`,
+      "",
+      updateInfo.installerUrl ? "Download the installer from GitHub Releases and start installation now?" : "No installable asset was found. Open the GitHub release page?"
+    ].join("\n")
+  });
+
+  if (updateInfo.installerUrl && result.response === 0) {
+    try {
+      const installerPath = await downloadUpdateInstaller(updateInfo);
+      launchInstaller(installerPath);
+    } catch (error) {
+      await dialog.showMessageBox(BrowserWindow.getFocusedWindow() || undefined, {
+        type: "error",
+        buttons: ["Open Release", "Close"],
+        defaultId: 0,
+        cancelId: 1,
+        title: "Update install failed",
+        message: "Kanban Agent could not download or start the installer.",
+        detail: error instanceof Error ? error.message : "Unknown update install error."
+      }).then((fallbackResult) => {
+        if (fallbackResult.response === 0 && targetUrl) {
+          void shell.openExternal(targetUrl);
+        }
+      });
+    }
+    return updateInfo;
+  }
+
+  const openReleaseResponse = updateInfo.installerUrl ? 1 : 0;
+  if (result.response === openReleaseResponse && targetUrl) {
+    await shell.openExternal(targetUrl);
+  }
+
+  return updateInfo;
+};
+
+const checkForAppUpdate = async (options = {}) => {
   const currentVersion = app.getVersion();
   const updateUrl = resolveGitHubReleasesUrl();
   if (!updateUrl) {
@@ -109,9 +249,10 @@ const checkForAppUpdate = async () => {
       latestVersion: "",
       updateAvailable: false,
       downloadUrl: "",
+      installerUrl: "",
       message: "No GitHub release source configured."
     };
-    return lastUpdateCheck;
+    return options.prompt ? promptForAppUpdate(lastUpdateCheck) : lastUpdateCheck;
   }
 
   try {
@@ -133,9 +274,10 @@ const checkForAppUpdate = async () => {
       latestVersion,
       updateAvailable,
       downloadUrl: payload.downloadUrl,
+      installerUrl: payload.installerUrl,
       message: updateAvailable ? `GitHub release ${latestVersion} is available.` : "You are on the latest GitHub release."
     };
-    return lastUpdateCheck;
+    return options.prompt ? promptForAppUpdate(lastUpdateCheck) : lastUpdateCheck;
   } catch (error) {
     lastUpdateCheck = {
       checkedAt: new Date().toISOString(),
@@ -143,9 +285,10 @@ const checkForAppUpdate = async () => {
       latestVersion: "",
       updateAvailable: false,
       downloadUrl: "",
+      installerUrl: "",
       message: error instanceof Error ? error.message : "Update check failed."
     };
-    return lastUpdateCheck;
+    return options.prompt ? promptForAppUpdate(lastUpdateCheck) : lastUpdateCheck;
   }
 };
 
@@ -215,7 +358,7 @@ const registerUpdateHandlers = () => {
     currentVersion: app.getVersion()
   }));
 
-  ipcMain.handle("updates:check", async () => checkForAppUpdate());
+  ipcMain.handle("updates:check", async (_event, options) => checkForAppUpdate({ prompt: Boolean(options?.prompt) }));
 };
 
 const parseCsv = (value) =>
@@ -1490,7 +1633,6 @@ app.whenReady().then(() => {
   registerRepoHandlers();
   registerCliHandlers();
   createWindow();
-  void checkForAppUpdate();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
