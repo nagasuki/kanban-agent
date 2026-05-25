@@ -1,6 +1,6 @@
 {
   "name": "kanban-agent",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "description": "Desktop Kanban control panel for AI agent workflows.",
   "author": "kanban-agent",
