@@ -31,8 +31,10 @@ import {
   simulateExecution,
   startCliExecution,
   startPlanOnlyExecution,
+  updateActiveSessionUsage,
   updateCard
 } from "../domain/boardService";
+import type { CreatePlanCardOptions } from "../domain/boardService";
 import { createId, nowIso } from "../domain/id";
 import { createModelProfile, deleteModelProfile, updateModelProfile } from "../domain/modelService";
 import { createSkill, deleteSkill, duplicateSkill, updateSkill } from "../domain/skillService";
@@ -127,6 +129,7 @@ export const App = () => {
       modelProfiles: [],
       cliToolProfiles,
       agentProfiles: [],
+      providerUsageRecords: [],
       createdAt: timestamp,
       updatedAt: timestamp
     };
@@ -214,8 +217,8 @@ export const App = () => {
     }));
   };
 
-  const handleCreatePlanFromPrompt = async (prompt: string) => {
-    const created = createPlanCardFromPrompt(activeWorkspace, prompt);
+  const handleCreatePlanFromPrompt = async (prompt: string, options: CreatePlanCardOptions) => {
+    const created = createPlanCardFromPrompt(activeWorkspace, prompt, options);
     setWarning(created.warning ?? null);
     if (created.warning || !created.cardId) {
       return;
@@ -244,6 +247,9 @@ export const App = () => {
       draftCard.runnerType === "cli"
         ? cliProfile
           ? await runCliPlanDraft(created.workspace, draftCard, cliProfile, (message) => {
+              if (!message) {
+                return;
+              }
               setState((current) => ({
                 ...current,
                 workspaces: current.workspaces.map((workspace) =>
@@ -288,8 +294,8 @@ export const App = () => {
     setPlanGenerating(false);
   };
 
-  const handleCreateManualPlan = (prompt: string) => {
-    const created = createPlanCardFromPrompt(activeWorkspace, prompt);
+  const handleCreateManualPlan = (prompt: string, options: CreatePlanCardOptions) => {
+    const created = createPlanCardFromPrompt(activeWorkspace, prompt, options);
     setWarning(created.warning ?? null);
     if (created.warning || !created.cardId) {
       return;
@@ -402,7 +408,7 @@ export const App = () => {
       )
     }));
 
-    const result = await runPlanOnly(activeWorkspace, card, (message) => {
+    const result = await runPlanOnly(started.workspace, card, (message) => {
       setState((current) => ({
         ...current,
         workspaces: current.workspaces.map((workspace) =>
@@ -508,18 +514,24 @@ export const App = () => {
       )
     }));
 
-    const result = await runCliAgent(started.workspace, card, profile, (message) => {
+    const result = await runCliAgent(started.workspace, card, profile, (message, usage) => {
       setState((current) => ({
         ...current,
-        workspaces: current.workspaces.map((workspace) =>
-          workspace.id === current.activeWorkspaceId ? appendCardLog(workspace, cardId, message) : workspace
-        )
+        workspaces: current.workspaces.map((workspace) => {
+          if (workspace.id !== current.activeWorkspaceId) {
+            return workspace;
+          }
+          const withUsage = usage ? updateActiveSessionUsage(workspace, cardId, usage) : workspace;
+          return message ? appendCardLog(withUsage, cardId, message) : withUsage;
+        })
       }));
     }).catch((error: unknown) => ({
       ok: false,
       provider: profile.name,
       summary: "CLI agent execution failed.",
-      rawText: error instanceof Error ? error.message : "Unknown CLI execution error."
+      rawText: error instanceof Error ? error.message : "Unknown CLI execution error.",
+      resolvedExecutablePath: undefined,
+      executionLogs: []
     }));
 
     setState((current) => ({
@@ -611,18 +623,24 @@ export const App = () => {
       )
     }));
 
-    const result = await runCliAgent(started.workspace, card, profile, (message) => {
+    const result = await runCliAgent(started.workspace, card, profile, (message, usage) => {
       setState((current) => ({
         ...current,
-        workspaces: current.workspaces.map((item) =>
-          item.id === current.activeWorkspaceId ? appendCardLog(item, cardId, message) : item
-        )
+        workspaces: current.workspaces.map((item) => {
+          if (item.id !== current.activeWorkspaceId) {
+            return item;
+          }
+          const withUsage = usage ? updateActiveSessionUsage(item, cardId, usage) : item;
+          return message ? appendCardLog(withUsage, cardId, message) : withUsage;
+        })
       }));
     }).catch((error: unknown) => ({
       ok: false,
       provider: profile.name,
       summary: "CLI agent execution failed.",
-      rawText: error instanceof Error ? error.message : "Unknown CLI execution error."
+      rawText: error instanceof Error ? error.message : "Unknown CLI execution error.",
+      resolvedExecutablePath: undefined,
+      executionLogs: []
     }));
 
     return started.workspace.cards.find((item) => item.id === cardId)?.columnId === "in-process"
@@ -652,7 +670,10 @@ export const App = () => {
     setWarning(result.ok ? result.message : result.stderr || result.message);
     if (result.ok && result.resolvedExecutablePath) {
       updateActiveWorkspace((workspace) =>
-        updateCliToolProfile(workspace, profile.id, { resolvedExecutablePath: result.resolvedExecutablePath })
+        updateCliToolProfile(workspace, profile.id, {
+          resolvedExecutablePath: result.resolvedExecutablePath,
+          detectedVersion: result.version
+        })
       );
     }
     return result;
@@ -927,6 +948,7 @@ export const App = () => {
       {planPromptOpen ? (
         <PlanPromptModal
           isGenerating={planGenerating}
+          workspace={activeWorkspace}
           onClose={() => {
             if (!planGenerating) {
               setPlanPromptOpen(false);

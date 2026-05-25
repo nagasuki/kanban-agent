@@ -8,6 +8,10 @@ contextBridge.exposeInMainWorld("kanbanAgent", {
     delete: (key) => ipcRenderer.invoke("secure-key:delete", key),
     has: (key) => ipcRenderer.invoke("secure-key:has", key)
   },
+  updates: {
+    getInfo: () => ipcRenderer.invoke("updates:get-info"),
+    check: () => ipcRenderer.invoke("updates:check")
+  },
   repo: {
     selectFolder: () => ipcRenderer.invoke("repo:select-folder"),
     inspect: (options) => ipcRenderer.invoke("repo:inspect", options),

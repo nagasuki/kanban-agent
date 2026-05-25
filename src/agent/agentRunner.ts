@@ -1,6 +1,7 @@
 import { getModelProviderClient } from "./providers/providerRegistry";
 import { secureKeyStore } from "../desktop/secureKeyStore";
 import { buildAgentPrompt, buildPlanDraftPrompt } from "../domain/promptBuilder";
+import { createModelProviderUsageRecord } from "../domain/providerUsageService";
 import type { KanbanCard, Workspace } from "../domain/types";
 
 export const runPlanOnly = async (
@@ -23,7 +24,26 @@ export const runPlanOnly = async (
   const prompt = buildAgentPrompt(card, workspace, model, skills, agent, cliTool);
   const apiKeyResult = await secureKeyStore.get(secureKeyStore.keyForModel(model.id));
   const apiKey = apiKeyResult.ok ? apiKeyResult.value : null;
-  return getModelProviderClient(model.provider).runPlanOnly({ apiKey, model, onStream, prompt });
+  const runningCard = workspace.cards.find((item) => item.id === card.id) ?? card;
+  const activeSession = runningCard.sessions.find((session) => session.id === runningCard.activeSessionId);
+  const result = await getModelProviderClient(model.provider).runPlanOnly({ apiKey, model, onStream, prompt });
+  if (!activeSession) {
+    return result;
+  }
+  const completedAt = new Date().toISOString();
+  return {
+    ...result,
+    usageRecord: createModelProviderUsageRecord({
+      workspaceId: workspace.id,
+      cardId: card.id,
+      sessionId: activeSession.id,
+      model,
+      prompt: prompt.finalPromptPreview,
+      output: result.rawText,
+      startedAt: activeSession.startedAt,
+      completedAt
+    })
+  };
 };
 
 export const runPlanDraft = async (

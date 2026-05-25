@@ -74,6 +74,7 @@ const normalizeAppState = (state: AppState): AppState => ({
         defaultCliToolProfileId: agent.defaultCliToolProfileId ?? workspace.defaultCliToolProfileId ?? cliToolProfiles[0]?.id ?? "",
         defaultExecutionMode: agent.defaultExecutionMode ?? "Suggest Patch"
       })),
+      providerUsageRecords: workspace.providerUsageRecords ?? [],
       cards: workspace.cards.map((card) => normalizeCard(card, workspace, cliToolProfiles))
     };
   })
@@ -150,6 +151,11 @@ const normalizeSession = (session: ImplementationSession, card: KanbanCard): Imp
   runnerType: session.runnerType ?? card.runnerType,
   modelProfileId: session.modelProfileId ?? card.modelProfileId,
   cliToolProfileId: session.cliToolProfileId ?? card.cliToolProfileId,
+  providerId: session.providerId,
+  providerName: session.providerName,
+  modelName: session.modelName,
+  usageRecordId: session.usageRecordId,
+  usageWasEstimated: session.usageWasEstimated ?? true,
   contextSnapshot: {
     title: session.contextSnapshot?.title ?? card.title,
     description: session.contextSnapshot?.description ?? card.description,
@@ -192,6 +198,11 @@ const createLegacySessions = (card: KanbanCard): ImplementationSession[] => {
       runnerType: card.runnerType,
       modelProfileId: card.modelProfileId,
       cliToolProfileId: card.cliToolProfileId,
+      providerId: undefined,
+      providerName: undefined,
+      modelName: undefined,
+      usageRecordId: undefined,
+      usageWasEstimated: true,
       contextSnapshot: {
         title: card.title,
         description: card.description,
@@ -247,7 +258,8 @@ const normalizeCliToolProfile = (profile: CliToolProfile): CliToolProfile => {
         : claudeArgs,
       environmentVariables: profile.environmentVariables ?? "",
       workingDirectory: profile.workingDirectory ?? "",
-      resolvedExecutablePath: profile.resolvedExecutablePath ?? ""
+      resolvedExecutablePath: profile.resolvedExecutablePath ?? "",
+      detectedVersion: profile.detectedVersion ?? ""
     };
   }
 
@@ -259,7 +271,8 @@ const normalizeCliToolProfile = (profile: CliToolProfile): CliToolProfile => {
       args: profile.command.trim().toLowerCase() === shellCommand ? claudeArgs : "-p",
       environmentVariables: profile.environmentVariables ?? "",
       workingDirectory: profile.workingDirectory ?? "",
-      resolvedExecutablePath: profile.resolvedExecutablePath ?? ""
+      resolvedExecutablePath: profile.resolvedExecutablePath ?? "",
+      detectedVersion: profile.detectedVersion ?? ""
     };
   }
 
@@ -276,7 +289,8 @@ const normalizeCliToolProfile = (profile: CliToolProfile): CliToolProfile => {
         : codexArgs,
       environmentVariables: profile.environmentVariables ?? "",
       workingDirectory: profile.workingDirectory ?? "",
-      resolvedExecutablePath: profile.resolvedExecutablePath ?? ""
+      resolvedExecutablePath: profile.resolvedExecutablePath ?? "",
+      detectedVersion: profile.detectedVersion ?? ""
     };
   }
 
@@ -288,16 +302,18 @@ const normalizeCliToolProfile = (profile: CliToolProfile): CliToolProfile => {
       args: profile.command.trim().toLowerCase() === shellCommand ? codexArgs : "exec -",
       environmentVariables: profile.environmentVariables ?? "",
       workingDirectory: profile.workingDirectory ?? "",
-      resolvedExecutablePath: profile.resolvedExecutablePath ?? ""
+      resolvedExecutablePath: profile.resolvedExecutablePath ?? "",
+      detectedVersion: profile.detectedVersion ?? ""
     };
   }
 
   return {
     ...profile,
-    providerId: profile.providerId ?? profile.provider.toLowerCase().replaceAll(" ", "-"),
+    providerId: profile.providerId ?? profile.provider.toLowerCase().replace(/\s+/g, "-"),
     displayName: profile.displayName ?? profile.name,
     environmentVariables: profile.environmentVariables ?? "",
     workingDirectory: profile.workingDirectory ?? "",
-    resolvedExecutablePath: profile.resolvedExecutablePath ?? ""
+    resolvedExecutablePath: profile.resolvedExecutablePath ?? "",
+    detectedVersion: profile.detectedVersion ?? ""
   };
 };

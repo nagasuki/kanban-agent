@@ -72,6 +72,7 @@ export const createDefaultCliToolProfiles = (): CliToolProfile[] => {
       environmentVariables: "",
       workingDirectory: "",
       resolvedExecutablePath: "",
+      detectedVersion: "",
       createdAt: timestamp,
       updatedAt: timestamp
     },
@@ -87,6 +88,7 @@ export const createDefaultCliToolProfiles = (): CliToolProfile[] => {
       environmentVariables: "",
       workingDirectory: "",
       resolvedExecutablePath: "",
+      detectedVersion: "",
       createdAt: timestamp,
       updatedAt: timestamp
     }

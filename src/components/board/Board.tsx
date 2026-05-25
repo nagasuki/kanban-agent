@@ -136,10 +136,12 @@ export const Board = ({
 
             {canUserCreateCard(column.id) ? (
               <div className="column-action-row">
-                <button className="column-add" type="button" onClick={() => onCreateCard(column.id)}>
-                  <Plus size={16} />
-                  {column.id === "my-plan" ? "New plan" : "New card"}
-                </button>
+                {column.id === "my-plan" ? (
+                  <button className="column-add" type="button" onClick={() => onCreateCard(column.id)}>
+                    <Plus size={16} />
+                    New plan
+                  </button>
+                ) : null}
                 {column.id === "start-implement" ? (
                   <button className="column-add primary" disabled={cards.length === 0} type="button" onClick={onStartImplementAll}>
                     <Play size={16} />

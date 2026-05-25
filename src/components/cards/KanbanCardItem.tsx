@@ -1,4 +1,5 @@
 import type { MouseEvent } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, Play, ShieldCheck, XCircle } from "lucide-react";
 import { BOARD_COLUMNS } from "../../domain/constants";
 import type { ImplementationSession, KanbanCard, Workspace } from "../../domain/types";
@@ -32,9 +33,18 @@ export const KanbanCardItem = ({
   onSelect,
   onStartCard
 }: KanbanCardItemProps) => {
+  const [, setNow] = useState(Date.now());
   const agent = workspace.agentProfiles.find((profile) => profile.id === card.agentProfileId);
   const latestSession = card.sessions.find((session) => session.id === card.activeSessionId) ?? card.sessions.at(-1);
   const columnTitle = BOARD_COLUMNS.find((column) => column.id === card.columnId)?.title ?? "Workflow";
+
+  useEffect(() => {
+    if (card.columnId !== "in-process") {
+      return undefined;
+    }
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [card.columnId]);
 
   const renderBody = () => {
     if (card.columnId === "start-implement") {
@@ -75,7 +85,8 @@ export const KanbanCardItem = ({
             <span>Running: {latestSession?.currentStep || "Preparing session"}</span>
             <span>{latestSession?.status === "failed" ? "Failed" : truncate(liveStatus, 72)}</span>
             <span>Elapsed: {elapsed}</span>
-            <span>Tokens: {formatTokens(latestSession)}</span>
+            <span>Tokens: {formatTokens(latestSession)}{latestSession?.usageWasEstimated ? " est." : ""}</span>
+            <span>Cost: {formatCost(latestSession)}</span>
           </div>
           <div className="card-inline-actions">
             <button type="button" onClick={(event) => stopAndRun(event, () => onCancelCard(card.id))}>
@@ -220,6 +231,14 @@ const formatTokens = (session: ImplementationSession | undefined) => {
     return `${(tokens / 1000).toFixed(1)}k`;
   }
   return `${tokens}`;
+};
+
+const formatCost = (session: ImplementationSession | undefined) => {
+  const cost = session?.tokenUsage.costUsd ?? 0;
+  if (cost <= 0) {
+    return "$0.00";
+  }
+  return `~$${cost.toFixed(cost < 0.01 ? 4 : 2)}`;
 };
 
 const changedFileCount = (session: ImplementationSession | undefined, card: KanbanCard) => {

@@ -1,6 +1,11 @@
 import { cliBridge } from "../desktop/cliBridge";
 import { buildAgentPrompt, buildPlanDraftPrompt } from "../domain/promptBuilder";
-import type { CliToolProfile, KanbanCard, Workspace } from "../domain/types";
+import {
+  createProviderUsageRecord,
+  estimateProviderCost,
+  estimateTokensFromText
+} from "../domain/providerUsageService";
+import type { CliToolProfile, KanbanCard, ProviderUsageRecord, Workspace } from "../domain/types";
 
 export interface CliAgentResult {
   ok: boolean;
@@ -9,13 +14,22 @@ export interface CliAgentResult {
   rawText: string;
   executionLogs?: string[];
   resolvedExecutablePath?: string;
+  usageRecord?: ProviderUsageRecord;
+}
+
+export interface CliLiveUsageEstimate {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  wasEstimated: boolean;
 }
 
 export const runCliAgent = async (
   workspace: Workspace,
   card: KanbanCard,
   profile: CliToolProfile,
-  onStream?: (message: string) => void
+  onStream?: (message: string, usage?: CliLiveUsageEstimate) => void
 ): Promise<CliAgentResult> => {
   const model = workspace.modelProfiles.find((item) => item.id === card.modelProfileId);
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
@@ -33,6 +47,22 @@ export const runCliAgent = async (
     "Do not commit or open a PR unless the card execution mode explicitly requests it and the prompt says approval has been granted."
   ].join("\n");
 
+  const runningCard = workspace.cards.find((item) => item.id === card.id) ?? card;
+  const activeSession = runningCard.sessions.find((session) => session.id === runningCard.activeSessionId);
+  const providerId = profile.providerId || profile.provider.toLowerCase().replace(/\s+/g, "-");
+  const inputTokens = estimateTokensFromText(cliPrompt);
+  let streamedOutput = "";
+  const emitUsage = () => {
+    const outputTokens = estimateTokensFromText(streamedOutput);
+    onStream?.("", {
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      estimatedCostUsd: estimateProviderCost(providerId, inputTokens, outputTokens),
+      wasEstimated: true
+    });
+  };
+
   const result = await cliBridge.run({
     args: profile.args,
     command: profile.command,
@@ -42,6 +72,8 @@ export const runCliAgent = async (
     runId: card.id,
     onOutput: (event) => {
       const clean = event.chunk.trim();
+      streamedOutput += event.chunk;
+      emitUsage();
       if (clean) {
         onStream?.(`${event.stream}: ${clean.slice(0, 500)}`);
       }
@@ -57,6 +89,21 @@ export const runCliAgent = async (
       .filter((entry) => entry.stream !== "system")
       .map((entry) => `${entry.stream}: ${entry.chunk.trim().slice(0, 500)}`)
   ].filter(Boolean);
+  const completedAt = new Date().toISOString();
+  const usageRecord = activeSession
+    ? createProviderUsageRecord({
+        workspaceId: workspace.id,
+        cardId: card.id,
+        sessionId: activeSession.id,
+        provider: profile,
+        prompt: cliPrompt,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        startedAt: activeSession.startedAt,
+        completedAt,
+        cliVersion: profile.detectedVersion
+      })
+    : undefined;
 
   return {
     ok: result.ok,
@@ -66,7 +113,8 @@ export const runCliAgent = async (
       : `${profile.name} failed${result.timedOut ? " after timing out" : result.cancelled ? " after cancellation" : ""}.`,
     rawText: output || "CLI produced no output.",
     executionLogs,
-    resolvedExecutablePath: result.resolvedExecutablePath
+    resolvedExecutablePath: result.resolvedExecutablePath,
+    usageRecord
   };
 };
 
@@ -74,7 +122,7 @@ export const runCliPlanDraft = async (
   workspace: Workspace,
   card: KanbanCard,
   profile: CliToolProfile,
-  onStream?: (message: string) => void
+  onStream?: (message: string, usage?: CliLiveUsageEstimate) => void
 ): Promise<CliAgentResult> => {
   const model = workspace.modelProfiles.find((item) => item.id === card.modelProfileId);
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
@@ -91,6 +139,20 @@ export const runCliPlanDraft = async (
     "Make the plan specific enough for a later implementation session."
   ].join("\n");
 
+  const providerId = profile.providerId || profile.provider.toLowerCase().replace(/\s+/g, "-");
+  const inputTokens = estimateTokensFromText(cliPrompt);
+  let streamedOutput = "";
+  const emitUsage = () => {
+    const outputTokens = estimateTokensFromText(streamedOutput);
+    onStream?.("", {
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      estimatedCostUsd: estimateProviderCost(providerId, inputTokens, outputTokens),
+      wasEstimated: true
+    });
+  };
+
   const result = await cliBridge.run({
     args: profile.args,
     command: profile.command,
@@ -100,6 +162,8 @@ export const runCliPlanDraft = async (
     runId: card.id,
     onOutput: (event) => {
       const clean = event.chunk.trim();
+      streamedOutput += event.chunk;
+      emitUsage();
       if (clean) {
         onStream?.(`${event.stream}: ${clean.slice(0, 500)}`);
       }

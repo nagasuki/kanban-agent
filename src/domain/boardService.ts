@@ -11,6 +11,7 @@ import type {
   BoardColumnId,
   ImplementationSession,
   KanbanCard,
+  ProviderUsageRecord,
   SessionRetryMode,
   ValidationResult,
   Workspace
@@ -25,6 +26,13 @@ export interface CreatePlanCardResult {
   workspace: Workspace;
   cardId?: string;
   warning?: string;
+}
+
+export interface CreatePlanCardOptions {
+  agentProfileId?: string;
+  runnerType?: KanbanCard["runnerType"];
+  modelProfileId?: string;
+  cliToolProfileId?: string;
 }
 
 export const createCard = (workspace: Workspace, columnId: BoardColumnId): Workspace => {
@@ -78,14 +86,20 @@ export const createCard = (workspace: Workspace, columnId: BoardColumnId): Works
   };
 };
 
-export const createPlanCardFromPrompt = (workspace: Workspace, prompt: string): CreatePlanCardResult => {
+export const createPlanCardFromPrompt = (
+  workspace: Workspace,
+  prompt: string,
+  options: CreatePlanCardOptions = {}
+): CreatePlanCardResult => {
   const cleanPrompt = prompt.trim();
   if (!cleanPrompt) {
     return { workspace, warning: "Prompt is required before creating a plan." };
   }
 
   const timestamp = nowIso();
-  const defaultAgent = workspace.agentProfiles.find((profile) => profile.id === workspace.defaultAgentProfileId);
+  const defaultAgent = workspace.agentProfiles.find((profile) =>
+    profile.id === (options.agentProfileId || workspace.defaultAgentProfileId)
+  );
   const title = titleFromPrompt(cleanPrompt);
   const card: KanbanCard = {
     id: createId("card"),
@@ -94,10 +108,11 @@ export const createPlanCardFromPrompt = (workspace: Workspace, prompt: string): 
     title,
     description: "Generating plan from prompt...",
     skillIds: defaultAgent?.skillIds ?? [],
-    runnerType: defaultAgent?.defaultRunnerType ?? (workspace.defaultCliToolProfileId ? "cli" : "api"),
-    modelProfileId: defaultAgent?.defaultModelProfileId ?? workspace.defaultModelProfileId,
-    agentProfileId: defaultAgent?.id,
-    cliToolProfileId: defaultAgent?.defaultCliToolProfileId || workspace.defaultCliToolProfileId || undefined,
+    runnerType: options.runnerType ?? defaultAgent?.defaultRunnerType ?? (workspace.defaultCliToolProfileId ? "cli" : "api"),
+    modelProfileId: options.modelProfileId ?? defaultAgent?.defaultModelProfileId ?? workspace.defaultModelProfileId,
+    agentProfileId: options.agentProfileId ?? defaultAgent?.id,
+    cliToolProfileId:
+      options.cliToolProfileId ?? (defaultAgent?.defaultCliToolProfileId || workspace.defaultCliToolProfileId || undefined),
     executionMode: "Plan Only",
     priority: "Normal",
     dependencyCardIds: [],
@@ -348,6 +363,51 @@ export const appendCardLog = (
   };
 };
 
+export const updateActiveSessionUsage = (
+  workspace: Workspace,
+  cardId: string,
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    estimatedCostUsd: number;
+    wasEstimated: boolean;
+  }
+): Workspace => {
+  const timestamp = nowIso();
+  return {
+    ...workspace,
+    cards: workspace.cards.map((card) =>
+      card.id === cardId
+        ? {
+            ...card,
+            sessions: card.sessions.map((session) =>
+              session.id === card.activeSessionId
+                ? {
+                    ...session,
+                    tokenUsage: {
+                      promptTokens: usage.inputTokens,
+                      completionTokens: usage.outputTokens,
+                      totalTokens: usage.totalTokens,
+                      costUsd: usage.estimatedCostUsd
+                    },
+                    usageWasEstimated: usage.wasEstimated,
+                    durationSeconds: Math.max(
+                      0,
+                      Math.round((new Date(timestamp).getTime() - new Date(session.startedAt).getTime()) / 1000)
+                    ),
+                    updatedAt: timestamp
+                  }
+                : session
+            ),
+            updatedAt: timestamp
+          }
+        : card
+    ),
+    updatedAt: timestamp
+  };
+};
+
 export const applyReviewAction = (
   workspace: Workspace,
   cardId: string,
@@ -497,9 +557,10 @@ export const startPlanOnlyExecution = (
 export const completePlanOnlyExecution = (
   workspace: Workspace,
   cardId: string,
-  result: { summary: string; rawText: string; provider: string }
+  result: { summary: string; rawText: string; provider: string; usageRecord?: ProviderUsageRecord }
 ): Workspace => {
   const timestamp = nowIso();
+  const usage = result.usageRecord;
   return {
     ...workspace,
     cards: workspace.cards.map((card) =>
@@ -517,6 +578,19 @@ export const completePlanOnlyExecution = (
               diffText: result.rawText,
               currentStep: "Waiting for review",
               completedAt: timestamp,
+              tokenUsage: usage
+                ? {
+                    promptTokens: usage.inputTokens,
+                    completionTokens: usage.outputTokens,
+                    totalTokens: usage.totalTokens,
+                    costUsd: usage.estimatedCostUsd ?? 0
+                  }
+                : undefined,
+              usageWasEstimated: usage?.wasEstimated,
+              providerId: usage?.providerId,
+              providerName: usage?.providerName,
+              modelName: usage?.modelName,
+              usageRecordId: usage?.id,
               extraLogs: [
                 createLogEntry(`Plan Only response received from ${result.provider}`, "success"),
                 createLogEntry("Implementation completed and ready for review", "success")
@@ -536,6 +610,7 @@ export const completePlanOnlyExecution = (
           }
         : card
     ),
+    providerUsageRecords: usage ? [...workspace.providerUsageRecords, usage] : workspace.providerUsageRecords,
     updatedAt: timestamp
   };
 };
@@ -549,9 +624,18 @@ export const startCliExecution = (
 export const completeCliExecution = (
   workspace: Workspace,
   cardId: string,
-  result: { ok: boolean; provider: string; summary: string; rawText: string; executionLogs?: string[]; resolvedExecutablePath?: string }
+  result: {
+    ok: boolean;
+    provider: string;
+    summary: string;
+    rawText: string;
+    executionLogs?: string[];
+    resolvedExecutablePath?: string;
+    usageRecord?: ProviderUsageRecord;
+  }
 ): Workspace => {
   const timestamp = nowIso();
+  const usage = result.usageRecord;
   const executionLogs = (result.executionLogs ?? [])
     .filter(Boolean)
     .slice(-30)
@@ -573,6 +657,19 @@ export const completeCliExecution = (
               diffText: result.rawText,
               currentStep: "Waiting for review",
               completedAt: timestamp,
+              tokenUsage: usage
+                ? {
+                    promptTokens: usage.inputTokens,
+                    completionTokens: usage.outputTokens,
+                    totalTokens: usage.totalTokens,
+                    costUsd: usage.estimatedCostUsd ?? 0
+                  }
+                : undefined,
+              usageWasEstimated: usage?.wasEstimated,
+              providerId: usage?.providerId,
+              providerName: usage?.providerName,
+              modelName: usage?.modelName,
+              usageRecordId: usage?.id,
               extraLogs: [
                 ...executionLogs,
                 createLogEntry(
@@ -600,6 +697,7 @@ export const completeCliExecution = (
           }
         : card
     ),
+    providerUsageRecords: usage ? [...workspace.providerUsageRecords, usage] : workspace.providerUsageRecords,
     updatedAt: timestamp
   };
 };
@@ -815,6 +913,10 @@ const createImplementationSession = (
 ): ImplementationSession => {
   const timestamp = nowIso();
   const attemptNumber = card.sessions.length + 1;
+  const model = workspace.modelProfiles.find((profile) => profile.id === card.modelProfileId);
+  const cliTool = workspace.cliToolProfiles.find(
+    (profile) => profile.id === (card.cliToolProfileId || workspace.defaultCliToolProfileId)
+  );
   return {
     id: createId("session"),
     cardId: card.id,
@@ -825,6 +927,11 @@ const createImplementationSession = (
     runnerType: card.runnerType,
     modelProfileId: card.modelProfileId,
     cliToolProfileId: card.cliToolProfileId || workspace.defaultCliToolProfileId || undefined,
+    providerId: card.runnerType === "cli" ? cliTool?.providerId : model?.provider.toLowerCase().replace(/\s+/g, "-"),
+    providerName: card.runnerType === "cli" ? cliTool?.displayName || cliTool?.name : model?.provider,
+    modelName: card.runnerType === "api" ? model?.modelName : undefined,
+    usageRecordId: undefined,
+    usageWasEstimated: true,
     contextSnapshot: {
       title: card.title,
       description: card.description,
@@ -882,6 +989,12 @@ const completeActiveSession = (
     diffText: string;
     currentStep: string;
     completedAt: string;
+    tokenUsage?: ImplementationSession["tokenUsage"];
+    usageWasEstimated?: boolean;
+    providerId?: string;
+    providerName?: string;
+    modelName?: string;
+    usageRecordId?: string;
     extraLogs: ReturnType<typeof createLogEntry>[];
   }
 ): ImplementationSession[] =>
@@ -893,6 +1006,12 @@ const completeActiveSession = (
           summary: updates.summary,
           diffText: updates.diffText,
           currentStep: updates.currentStep,
+          tokenUsage: updates.tokenUsage ?? session.tokenUsage,
+          usageWasEstimated: updates.usageWasEstimated ?? session.usageWasEstimated,
+          providerId: updates.providerId ?? session.providerId,
+          providerName: updates.providerName ?? session.providerName,
+          modelName: updates.modelName ?? session.modelName,
+          usageRecordId: updates.usageRecordId ?? session.usageRecordId,
           logs: [...session.logs, ...updates.extraLogs],
           durationSeconds: Math.max(
             0,

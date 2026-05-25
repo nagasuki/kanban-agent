@@ -545,6 +545,16 @@ export const CardDetailModal = ({
             <span>{latestSession.tokenUsage.totalTokens} tokens</span>
             <span>${latestSession.tokenUsage.costUsd.toFixed(4)}</span>
           </div>
+          <div className="usage-summary-grid">
+            <span>Provider: {latestSession.providerName || selectedCliTool?.name || selectedModel?.provider || "Unknown"}</span>
+            <span>Model: {latestSession.modelName || selectedModel?.modelName || "CLI default"}</span>
+            <span>Input: {formatUsageTokens(latestSession.tokenUsage.promptTokens)}</span>
+            <span>Output: {formatUsageTokens(latestSession.tokenUsage.completionTokens)}</span>
+            <span>Total: {formatUsageTokens(latestSession.tokenUsage.totalTokens)}</span>
+            <span>Cost: {formatUsageCost(latestSession.tokenUsage.costUsd, latestSession.usageWasEstimated)}</span>
+            <span>Elapsed: {formatUsageDuration(latestSession.durationSeconds * 1000)}</span>
+            <span>Tokens/min: {formatTokensPerMinute(latestSession.tokenUsage.totalTokens, latestSession.durationSeconds)}</span>
+          </div>
           <div className="repo-status-grid">
             {latestSession.validationResults.map((result) => (
               <span className={result.status === "failed" ? "warning-text" : result.status === "passed" ? "success-text" : ""} key={result.id}>
@@ -725,6 +735,10 @@ export const CardDetailModal = ({
                   Session #{session.attemptNumber} / {session.status} / {session.retryMode}
                 </span>
                 <p>{session.summary || session.currentStep}</p>
+                <p>
+                  {session.providerName || "Provider unknown"} / {formatUsageTokens(session.tokenUsage.totalTokens)} tokens /{" "}
+                  {formatUsageCost(session.tokenUsage.costUsd, session.usageWasEstimated)}
+                </p>
               </div>
             ))}
           {card.sessions.length === 0 ? <p className="helper-text">No implementation sessions yet.</p> : null}
@@ -745,3 +759,28 @@ const splitList = (value: string): string[] =>
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+
+const formatUsageTokens = (tokens: number) => {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(2)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return `${tokens}`;
+};
+
+const formatUsageCost = (cost: number, estimated?: boolean) => {
+  const prefix = estimated ? "~" : "";
+  return `${prefix}$${cost.toFixed(cost < 0.01 ? 4 : 2)}`;
+};
+
+const formatUsageDuration = (durationMs: number) => {
+  const seconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+};
+
+const formatTokensPerMinute = (tokens: number, durationSeconds: number) => {
+  if (durationSeconds <= 0) {
+    return "0";
+  }
+  return formatUsageTokens(Math.round(tokens / (durationSeconds / 60)));
+};

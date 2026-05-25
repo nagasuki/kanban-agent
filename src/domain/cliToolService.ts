@@ -15,6 +15,7 @@ export const createCliToolProfile = (workspace: Workspace): Workspace => {
     environmentVariables: "",
     workingDirectory: "",
     resolvedExecutablePath: "",
+    detectedVersion: "",
     createdAt: timestamp,
     updatedAt: timestamp
   };

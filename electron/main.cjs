@@ -1,9 +1,153 @@
-const { app, BrowserWindow, dialog, ipcMain, safeStorage } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage } = require("electron");
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
 const secretsFilePath = () => path.join(app.getPath("userData"), "secure-api-keys.json");
+
+const readPackageJson = () => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, "../package.json"), "utf8"));
+  } catch {
+    return {};
+  }
+};
+
+const compareVersions = (current, latest) => {
+  const currentParts = String(current || "0.0.0").replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const latestParts = String(latest || "0.0.0").replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
+  for (let index = 0; index < Math.max(currentParts.length, latestParts.length); index += 1) {
+    const currentPart = currentParts[index] ?? 0;
+    const latestPart = latestParts[index] ?? 0;
+    if (latestPart > currentPart) return true;
+    if (latestPart < currentPart) return false;
+  }
+  return false;
+};
+
+const normalizeGitHubRepo = (value) => {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  if (/^[\w.-]+\/[\w.-]+$/.test(clean)) return clean;
+
+  const httpsMatch = clean.match(/github\.com[/:]([^/]+)\/([^/.]+)(?:\.git)?/i);
+  if (httpsMatch) {
+    return `${httpsMatch[1]}/${httpsMatch[2]}`;
+  }
+
+  const sshMatch = clean.match(/git@github\.com:([^/]+)\/([^/.]+)(?:\.git)?/i);
+  if (sshMatch) {
+    return `${sshMatch[1]}/${sshMatch[2]}`;
+  }
+
+  return "";
+};
+
+const resolveGitHubRepo = () => {
+  const packageJson = readPackageJson();
+  const configuredRepo =
+    process.env.KANBAN_AGENT_GITHUB_REPO ||
+    packageJson.githubRepo ||
+    packageJson.repository?.url ||
+    packageJson.repository ||
+    "";
+  const normalizedRepo = normalizeGitHubRepo(configuredRepo);
+  if (normalizedRepo) {
+    return normalizedRepo;
+  }
+
+  try {
+    const remote = execFileSync("git", ["config", "--get", "remote.origin.url"], {
+      cwd: path.join(__dirname, ".."),
+      encoding: "utf8",
+      windowsHide: true
+    }).trim();
+    return normalizeGitHubRepo(remote);
+  } catch {
+    return "";
+  }
+};
+
+const resolveGitHubReleasesUrl = () => {
+  const repo = resolveGitHubRepo();
+  return repo ? `https://api.github.com/repos/${repo}/releases/latest` : "";
+};
+
+let lastUpdateCheck = {
+  checkedAt: "",
+  currentVersion: app.getVersion(),
+  latestVersion: "",
+  updateAvailable: false,
+  downloadUrl: "",
+  message: "Update check has not run yet."
+};
+
+const normalizeUpdatePayload = (payload) => {
+  if (Array.isArray(payload)) {
+    const release = payload.find((item) => !item.draft && !item.prerelease) || payload[0] || {};
+    return {
+      version: release.tag_name || release.name || release.version || "",
+      downloadUrl: release.html_url || release.assets?.[0]?.browser_download_url || "",
+      notes: release.body || ""
+    };
+  }
+
+  return {
+    version: payload.version || payload.latestVersion || payload.tag_name || payload.name || "",
+    downloadUrl: payload.url || payload.downloadUrl || payload.html_url || payload.assets?.[0]?.browser_download_url || "",
+    notes: payload.notes || payload.body || ""
+  };
+};
+
+const checkForAppUpdate = async () => {
+  const currentVersion = app.getVersion();
+  const updateUrl = resolveGitHubReleasesUrl();
+  if (!updateUrl) {
+    lastUpdateCheck = {
+      checkedAt: new Date().toISOString(),
+      currentVersion,
+      latestVersion: "",
+      updateAvailable: false,
+      downloadUrl: "",
+      message: "No GitHub release source configured."
+    };
+    return lastUpdateCheck;
+  }
+
+  try {
+    const response = await fetch(updateUrl, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "kanban-agent-update-checker"
+      }
+    });
+    if (!response.ok) {
+      throw new Error(`Update server returned HTTP ${response.status}.`);
+    }
+    const payload = normalizeUpdatePayload(await response.json());
+    const latestVersion = String(payload.version || "").replace(/^v/i, "");
+    const updateAvailable = latestVersion ? compareVersions(currentVersion, latestVersion) : false;
+    lastUpdateCheck = {
+      checkedAt: new Date().toISOString(),
+      currentVersion,
+      latestVersion,
+      updateAvailable,
+      downloadUrl: payload.downloadUrl,
+      message: updateAvailable ? `GitHub release ${latestVersion} is available.` : "You are on the latest GitHub release."
+    };
+    return lastUpdateCheck;
+  } catch (error) {
+    lastUpdateCheck = {
+      checkedAt: new Date().toISOString(),
+      currentVersion,
+      latestVersion: "",
+      updateAvailable: false,
+      downloadUrl: "",
+      message: error instanceof Error ? error.message : "Update check failed."
+    };
+    return lastUpdateCheck;
+  }
+};
 
 const readSecrets = () => {
   try {
@@ -63,6 +207,15 @@ const registerSecureKeyHandlers = () => {
     hasKey: Boolean(readSecrets()[key]),
     encryptionAvailable: safeStorage.isEncryptionAvailable()
   }));
+};
+
+const registerUpdateHandlers = () => {
+  ipcMain.handle("updates:get-info", async () => ({
+    ...lastUpdateCheck,
+    currentVersion: app.getVersion()
+  }));
+
+  ipcMain.handle("updates:check", async () => checkForAppUpdate());
 };
 
 const parseCsv = (value) =>
@@ -1312,12 +1465,14 @@ const createWindow = () => {
     title: "kanban-agent",
     backgroundColor: "#0b0f14",
     icon: appIcon,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false
     }
   });
+  win.setMenuBarVisibility(false);
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
   if (devServerUrl) {
@@ -1329,10 +1484,13 @@ const createWindow = () => {
 };
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   registerSecureKeyHandlers();
+  registerUpdateHandlers();
   registerRepoHandlers();
   registerCliHandlers();
   createWindow();
+  void checkForAppUpdate();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -2,7 +2,8 @@ import { Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import type { CliValidationResult } from "../../desktop/cliBridge";
 import type { ThemeMode } from "../../app/theme";
-import type { AgentProfile, AppState, CliToolProfile, ModelProfile, SkillPreset, Workspace } from "../../domain/types";
+import { aggregateUsageRecords, usageForProvider } from "../../domain/providerUsageService";
+import type { AgentProfile, AppState, CliToolProfile, ModelProfile, ProviderUsageRecord, SkillPreset, Workspace } from "../../domain/types";
 import { AgentEditor } from "../agents/AgentEditor";
 import { CliToolEditor } from "../cli/CliToolEditor";
 import { ModelEditor } from "../models/ModelEditor";
@@ -49,6 +50,7 @@ type SettingsCategory =
   | "Sandbox & Safety"
   | "Version Control"
   | "Appearance"
+  | "Usage Dashboard"
   | "Logs"
   | "Experimental";
 
@@ -62,6 +64,7 @@ const categories: SettingsCategory[] = [
   "Sandbox & Safety",
   "Version Control",
   "Appearance",
+  "Usage Dashboard",
   "Logs",
   "Experimental"
 ];
@@ -110,6 +113,7 @@ export const SettingsModal = (props: SettingsModalProps) => {
           {category === "Execution Rules" ? <PlaceholderSettings title="Execution Rules" /> : null}
           {category === "Sandbox & Safety" ? <PlaceholderSettings title="Sandbox & Safety" /> : null}
           {category === "Version Control" ? <PlaceholderSettings title="Version Control" /> : null}
+          {category === "Usage Dashboard" ? <UsageDashboardSettings {...props} /> : null}
           {category === "Logs" ? <PlaceholderSettings title="Logs" /> : null}
           {category === "Experimental" ? <PlaceholderSettings title="Experimental" /> : null}
         </main>
@@ -375,11 +379,313 @@ const CliSettings = ({ activeWorkspace, onCreateCliTool, onDeleteCliTool, onTest
           onUpdate={(updates) => onUpdateCliTool(profile.id, updates)}
           onTest={() => onTestCliTool(profile)}
           onDelete={() => onDeleteCliTool(profile.id)}
+          usageStats={usageForProvider(activeWorkspace, profile)}
         />
       ))}
     </div>
   </>
 );
+
+const UsageDashboardSettings = ({ state }: SettingsModalProps) => {
+  const [providerFilter, setProviderFilter] = useState("");
+  const [modelFilter, setModelFilter] = useState("");
+  const [workspaceFilter, setWorkspaceFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [minCost, setMinCost] = useState("");
+  const [maxCost, setMaxCost] = useState("");
+  const allRecords = state.workspaces.flatMap((workspace) => workspace.providerUsageRecords ?? []);
+  const workspaceOptions = state.workspaces.map((workspace) => ({ id: workspace.id, name: workspace.name }));
+  const providerOptions = unique(allRecords.map((record) => record.providerId).filter(Boolean));
+  const modelOptions = unique(allRecords.map((record) => record.modelName).filter(Boolean) as string[]);
+  const filteredRecords = allRecords.filter((record) => {
+    const workspace = state.workspaces.find((item) => item.id === record.workspaceId);
+    const session = workspace?.cards.flatMap((card) => card.sessions).find((item) => item.id === record.sessionId);
+    const cost = record.estimatedCostUsd ?? 0;
+    return (
+      (!providerFilter || record.providerId === providerFilter) &&
+      (!modelFilter || record.modelName === modelFilter) &&
+      (!workspaceFilter || record.workspaceId === workspaceFilter) &&
+      (!statusFilter || session?.status === statusFilter) &&
+      (!startDate || record.completedAt.slice(0, 10) >= startDate) &&
+      (!endDate || record.completedAt.slice(0, 10) <= endDate) &&
+      (!minCost || cost >= Number(minCost)) &&
+      (!maxCost || cost <= Number(maxCost))
+    );
+  });
+  const analytics = aggregateUsageRecords(filteredRecords);
+  const modelStats = Array.from(groupUsageByModel(filteredRecords).entries()).map(([modelName, records]) => ({
+    modelName,
+    sessions: records.length,
+    tokens: records.reduce((total, record) => total + record.totalTokens, 0),
+    cost: records.reduce((total, record) => total + (record.estimatedCostUsd ?? 0), 0)
+  }));
+
+  return (
+    <>
+      <PanelHeader
+        eyebrow="Usage Dashboard"
+        title="Provider Usage"
+        description="Track provider sessions, estimated tokens, cost, and activity across workspaces."
+      />
+
+      <div className="usage-filter-grid">
+        <label>
+          Provider
+          <select value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)}>
+            <option value="">All providers</option>
+            {providerOptions.map((providerId) => (
+              <option key={providerId} value={providerId}>
+                {providerId}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Model
+          <select value={modelFilter} onChange={(event) => setModelFilter(event.target.value)}>
+            <option value="">All models</option>
+            {modelOptions.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Workspace
+          <select value={workspaceFilter} onChange={(event) => setWorkspaceFilter(event.target.value)}>
+            <option value="">All workspaces</option>
+            {workspaceOptions.map((workspace) => (
+              <option key={workspace.id} value={workspace.id}>
+                {workspace.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Session status
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="">All statuses</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </label>
+        <label>
+          From
+          <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+        </label>
+        <label>
+          To
+          <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+        </label>
+        <label>
+          Min cost
+          <input type="number" min="0" step="0.01" value={minCost} onChange={(event) => setMinCost(event.target.value)} />
+        </label>
+        <label>
+          Max cost
+          <input type="number" min="0" step="0.01" value={maxCost} onChange={(event) => setMaxCost(event.target.value)} />
+        </label>
+      </div>
+
+      <div className="usage-metric-grid">
+        <UsageMetric label="Sessions" value={`${analytics.totalSessions}`} />
+        <UsageMetric label="Tokens" value={formatDashboardTokens(analytics.totalTokens)} />
+        <UsageMetric label="Estimated Cost" value={formatDashboardCost(analytics.totalEstimatedCostUsd)} />
+        <UsageMetric label="Avg Duration" value={formatDashboardDuration(analytics.averageDurationMs)} />
+        <UsageMetric label="Avg Tokens/Session" value={formatDashboardTokens(analytics.averageTokensPerSession)} />
+      </div>
+
+      <div className="button-row">
+        <button type="button" onClick={() => exportUsageJson(filteredRecords)}>
+          Export JSON
+        </button>
+        <button type="button" onClick={() => exportUsageCsv(filteredRecords)}>
+          Export CSV
+        </button>
+      </div>
+
+      <div className="settings-section">
+        <h4>Per Provider</h4>
+        <div className="usage-table">
+          {analytics.perProvider.map((provider) => (
+            <div className="usage-table-row" key={provider.providerId}>
+              <strong>{provider.providerName}</strong>
+              <span>{provider.totalSessions} sessions</span>
+              <span>{formatDashboardTokens(provider.totalTokens)}</span>
+              <span>{formatDashboardCost(provider.totalEstimatedCostUsd)}</span>
+              <span>{formatDashboardDuration(provider.averageDurationMs)} avg</span>
+            </div>
+          ))}
+          {analytics.perProvider.length === 0 ? <p className="helper-text">No usage records match these filters.</p> : null}
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <h4>Model Usage</h4>
+        <div className="usage-table">
+          {modelStats.map((model) => (
+            <div className="usage-table-row" key={model.modelName}>
+              <strong>{model.modelName}</strong>
+              <span>{model.sessions} sessions</span>
+              <span>{formatDashboardTokens(model.tokens)}</span>
+              <span>{formatDashboardCost(model.cost)}</span>
+              <span>{formatDashboardTokens(model.sessions > 0 ? model.tokens / model.sessions : 0)} avg</span>
+            </div>
+          ))}
+          {modelStats.length === 0 ? <p className="helper-text">No model usage records match these filters.</p> : null}
+        </div>
+      </div>
+
+      <UsageBars title="Sessions / Day" records={analytics.daily} valueKey="sessions" valueLabel={(value) => `${value}`} />
+      <UsageBars title="Tokens / Day" records={analytics.daily} valueKey="tokens" valueLabel={formatDashboardTokens} />
+      <UsageBars title="Cost / Day" records={analytics.daily} valueKey="estimatedCostUsd" valueLabel={formatDashboardCost} />
+
+      <TopUsage title="Most Expensive Tasks" records={analytics.topCost} value={(record) => formatDashboardCost(record.estimatedCostUsd ?? 0)} />
+      <TopUsage title="Largest Token Sessions" records={analytics.topTokens} value={(record) => formatDashboardTokens(record.totalTokens)} />
+      <TopUsage title="Longest Running Sessions" records={analytics.topDuration} value={(record) => formatDashboardDuration(record.executionDurationMs)} />
+    </>
+  );
+};
+
+const UsageMetric = ({ label, value }: { label: string; value: string }) => (
+  <div className="usage-metric">
+    <span>{label}</span>
+    <strong>{value}</strong>
+  </div>
+);
+
+const UsageBars = ({
+  records,
+  title,
+  valueKey,
+  valueLabel
+}: {
+  records: Array<{ date: string; sessions: number; tokens: number; estimatedCostUsd: number }>;
+  title: string;
+  valueKey: "sessions" | "tokens" | "estimatedCostUsd";
+  valueLabel: (value: number) => string;
+}) => {
+  const max = Math.max(1, ...records.map((record) => Number(record[valueKey])));
+  return (
+    <div className="settings-section">
+      <h4>{title}</h4>
+      <div className="usage-bars">
+        {records.slice(-14).map((record) => {
+          const value = Number(record[valueKey]);
+          return (
+            <div className="usage-bar-row" key={`${title}-${record.date}`}>
+              <span>{record.date}</span>
+              <div><i style={{ width: `${Math.max(3, (value / max) * 100)}%` }} /></div>
+              <strong>{valueLabel(value)}</strong>
+            </div>
+          );
+        })}
+        {records.length === 0 ? <p className="helper-text">No daily usage yet.</p> : null}
+      </div>
+    </div>
+  );
+};
+
+const TopUsage = ({
+  records,
+  title,
+  value
+}: {
+  records: ProviderUsageRecord[];
+  title: string;
+  value: (record: ProviderUsageRecord) => string;
+}) => (
+  <div className="settings-section">
+    <h4>{title}</h4>
+    <div className="usage-table">
+      {records.map((record) => (
+        <div className="usage-table-row" key={`${title}-${record.id}`}>
+          <strong>{record.providerName}</strong>
+          <span>{record.cardId || "No card"}</span>
+          <span>{record.wasEstimated ? "Estimated" : "Exact"}</span>
+          <span>{value(record)}</span>
+        </div>
+      ))}
+      {records.length === 0 ? <p className="helper-text">No usage records yet.</p> : null}
+    </div>
+  </div>
+);
+
+const unique = (values: string[]): string[] => Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
+
+const groupUsageByModel = (records: ProviderUsageRecord[]): Map<string, ProviderUsageRecord[]> => {
+  const groups = new Map<string, ProviderUsageRecord[]>();
+  for (const record of records) {
+    const key = record.modelName || `${record.providerName} default`;
+    groups.set(key, [...(groups.get(key) ?? []), record]);
+  }
+  return groups;
+};
+
+const formatDashboardTokens = (tokens: number) => {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(2)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return `${Math.round(tokens)}`;
+};
+
+const formatDashboardCost = (cost: number) => `$${cost.toFixed(cost < 0.01 ? 4 : 2)}`;
+
+const formatDashboardDuration = (durationMs: number) => {
+  const seconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+};
+
+const exportUsageJson = (records: ProviderUsageRecord[]) => {
+  downloadUsageFile("kanban-agent-usage.json", "application/json", JSON.stringify(records, null, 2));
+};
+
+const exportUsageCsv = (records: ProviderUsageRecord[]) => {
+  const headers = [
+    "id",
+    "providerId",
+    "providerName",
+    "modelName",
+    "sessionId",
+    "cardId",
+    "workspaceId",
+    "inputTokens",
+    "outputTokens",
+    "totalTokens",
+    "estimatedInputTokens",
+    "estimatedOutputTokens",
+    "estimatedCostUsd",
+    "executionDurationMs",
+    "requestCount",
+    "startedAt",
+    "completedAt",
+    "wasEstimated",
+    "cliVersion"
+  ];
+  const rows = records.map((record) =>
+    headers.map((header) => csvCell(String(record[header as keyof ProviderUsageRecord] ?? ""))).join(",")
+  );
+  downloadUsageFile("kanban-agent-usage.csv", "text/csv", [headers.join(","), ...rows].join("\n"));
+};
+
+const downloadUsageFile = (filename: string, type: string, content: string) => {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+const csvCell = (value: string) => `"${value.replace(/"/g, "\"\"")}"`;
 
 const AgentSettings = ({ activeWorkspace, onCreateAgent, onDeleteAgent, onUpdateAgent }: SettingsModalProps) => (
   <>

@@ -169,6 +169,7 @@ export const createSeedState = (): AppState => {
         updatedAt: timestamp
       }
     ],
+    providerUsageRecords: [],
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -289,6 +290,11 @@ const createSeedSession = (input: {
   runnerType: input.input.runnerType,
   modelProfileId: input.input.modelProfileId,
   cliToolProfileId: undefined,
+  providerId: undefined,
+  providerName: undefined,
+  modelName: undefined,
+  usageRecordId: undefined,
+  usageWasEstimated: true,
   contextSnapshot: {
     title: input.input.title,
     description: input.input.description,

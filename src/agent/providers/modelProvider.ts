@@ -1,10 +1,11 @@
 import type { GeneratedPrompt } from "../../domain/promptBuilder";
-import type { ModelProfile } from "../../domain/types";
+import type { ModelProfile, ProviderUsageRecord } from "../../domain/types";
 
 export interface PlanOnlyResult {
   summary: string;
   rawText: string;
   provider: string;
+  usageRecord?: ProviderUsageRecord;
 }
 
 export interface ModelProviderClient {

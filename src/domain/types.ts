@@ -82,6 +82,29 @@ export interface TokenUsage {
   costUsd: number;
 }
 
+export interface ProviderUsageRecord {
+  id: string;
+  providerId: string;
+  providerName: string;
+  modelName?: string;
+  sessionId?: string;
+  cardId?: string;
+  workspaceId?: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedInputTokens?: number;
+  estimatedOutputTokens?: number;
+  estimatedCostUsd?: number;
+  executionDurationMs: number;
+  requestCount: number;
+  startedAt: string;
+  completedAt: string;
+  wasEstimated: boolean;
+  rawUsagePayload?: string;
+  cliVersion?: string;
+}
+
 export interface ImplementationSession {
   id: string;
   cardId: string;
@@ -92,6 +115,11 @@ export interface ImplementationSession {
   runnerType: AgentRunnerType;
   modelProfileId: string;
   cliToolProfileId?: string;
+  providerId?: string;
+  providerName?: string;
+  modelName?: string;
+  usageRecordId?: string;
+  usageWasEstimated?: boolean;
   contextSnapshot: SessionContextSnapshot;
   promptPreview: string;
   logs: ActivityLogEntry[];
@@ -198,6 +226,7 @@ export interface CliToolProfile {
   environmentVariables?: string;
   workingDirectory?: string;
   resolvedExecutablePath?: string;
+  detectedVersion?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -258,6 +287,7 @@ export interface Workspace {
   modelProfiles: ModelProfile[];
   cliToolProfiles: CliToolProfile[];
   agentProfiles: AgentProfile[];
+  providerUsageRecords: ProviderUsageRecord[];
   createdAt: string;
   updatedAt: string;
 }

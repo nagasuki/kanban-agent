@@ -10,6 +10,24 @@ declare global {
         delete: (key: string) => Promise<{ ok: boolean; message: string }>;
         has: (key: string) => Promise<{ ok: boolean; hasKey: boolean; encryptionAvailable: boolean }>;
       };
+      updates?: {
+        getInfo: () => Promise<{
+          checkedAt: string;
+          currentVersion: string;
+          latestVersion: string;
+          updateAvailable: boolean;
+          downloadUrl: string;
+          message: string;
+        }>;
+        check: () => Promise<{
+          checkedAt: string;
+          currentVersion: string;
+          latestVersion: string;
+          updateAvailable: boolean;
+          downloadUrl: string;
+          message: string;
+        }>;
+      };
       repo?: {
         selectFolder: () => Promise<{ ok: boolean; path: string | null; message: string }>;
         inspect: (
