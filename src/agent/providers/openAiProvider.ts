@@ -4,7 +4,7 @@ export const openAiProvider: ModelProviderClient = {
   id: "openai",
   label: "OpenAI",
 
-  runPlanOnly: async ({ apiKey, model, onStream, prompt }) => {
+  runPlanOnly: async ({ apiKey, model, onStream, prompt, signal }) => {
     if (!apiKey) {
       return {
         provider: "OpenAI",
@@ -20,6 +20,7 @@ export const openAiProvider: ModelProviderClient = {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
+      signal,
       body: JSON.stringify({
         model: model.modelName,
         temperature: model.temperature,

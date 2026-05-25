@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Board } from "../components/board/Board";
 import { CardDetailModal } from "../components/drawer/CardDetailDrawer";
 import { PlanPromptModal } from "../components/plans/PlanPromptModal";
@@ -53,7 +53,8 @@ export const App = () => {
   const [compactBoard, setCompactBoard] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [planPromptOpen, setPlanPromptOpen] = useState(false);
-  const [planGenerating, setPlanGenerating] = useState(false);
+  const cancelledPlanIdsRef = useRef<Set<string>>(new Set());
+  const planAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
 
   useEffect(() => {
@@ -229,15 +230,19 @@ export const App = () => {
       return;
     }
 
-    setPlanGenerating(true);
     setPlanPromptOpen(false);
-    setSelectedCardId(created.cardId);
+    cancelledPlanIdsRef.current.delete(draftCard.id);
     setState((current) => ({
       ...current,
       workspaces: current.workspaces.map((workspace) =>
         workspace.id === current.activeWorkspaceId ? created.workspace : workspace
       )
     }));
+
+    const abortController = draftCard.runnerType === "api" ? new AbortController() : undefined;
+    if (abortController) {
+      planAbortControllersRef.current.set(draftCard.id, abortController);
+    }
 
     const cliProfile = created.workspace.cliToolProfiles.find(
       (profile) => profile.id === (draftCard.cliToolProfileId || created.workspace.defaultCliToolProfileId)
@@ -275,14 +280,24 @@ export const App = () => {
                 workspace.id === current.activeWorkspaceId ? appendCardLog(workspace, draftCard.id, message) : workspace
               )
             }));
-          })
+          }, abortController?.signal)
             .then((apiResult) => ({ ...apiResult, ok: true }))
             .catch((error: unknown) => ({
               ok: false,
               provider: "API Model",
-              summary: "API plan generation failed.",
-              rawText: error instanceof Error ? error.message : "Unknown API plan generation error."
+              summary: abortController?.signal.aborted ? "API plan generation cancelled." : "API plan generation failed.",
+              rawText: abortController?.signal.aborted
+                ? "Plan generation cancelled by user."
+                : error instanceof Error
+                  ? error.message
+                  : "Unknown API plan generation error."
             }));
+
+    planAbortControllersRef.current.delete(draftCard.id);
+    if (cancelledPlanIdsRef.current.has(draftCard.id)) {
+      cancelledPlanIdsRef.current.delete(draftCard.id);
+      return;
+    }
 
     setState((current) => ({
       ...current,
@@ -291,7 +306,6 @@ export const App = () => {
       )
     }));
     setWarning(result.ok ? null : result.rawText);
-    setPlanGenerating(false);
   };
 
   const handleCreateManualPlan = (prompt: string, options: CreatePlanCardOptions) => {
@@ -550,6 +564,78 @@ export const App = () => {
     }));
   };
 
+  const confirmAction = (message: string): boolean => window.confirm(message);
+
+  const isGeneratingPlanCard = (card: KanbanCard | undefined): card is KanbanCard =>
+    Boolean(card && card.columnId === "my-plan" && card.locked);
+
+  const handleSelectCard = (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (isGeneratingPlanCard(card)) {
+      setWarning("This plan is still generating. Cancel it first or wait until it finishes before opening.");
+      return;
+    }
+    setSelectedCardId(cardId);
+  };
+
+  const markPlanGenerationCancelled = (cardId: string) => {
+    updateActiveWorkspace((workspace) =>
+      appendCardLog(
+        updateCard(workspace, cardId, {
+          description: "Plan generation cancelled by user.",
+          locked: false
+        }),
+        cardId,
+        "Plan generation cancelled",
+        "warning"
+      )
+    );
+    if (selectedCardId === cardId) {
+      setSelectedCardId(null);
+    }
+    setWarning("Plan generation cancelled.");
+  };
+
+  const stopPlanGeneration = async (card: KanbanCard) => {
+    cancelledPlanIdsRef.current.add(card.id);
+    planAbortControllersRef.current.get(card.id)?.abort();
+    planAbortControllersRef.current.delete(card.id);
+    if (card.runnerType === "cli") {
+      await cliBridge.cancel(card.id);
+    }
+  };
+
+  const handleCancelPlanGenerating = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!isGeneratingPlanCard(card)) {
+      return;
+    }
+    if (!confirmAction("Cancel this plan generation and stop the AI process?")) {
+      return;
+    }
+
+    await stopPlanGeneration(card);
+    markPlanGenerationCancelled(card.id);
+  };
+
+  const handleReviewAction = (
+    cardId: string,
+    action: "approve" | "request-changes" | "retry" | "rollback"
+  ) => {
+    const confirmMessages = {
+      approve: "Approve this session?",
+      "request-changes": "Reject this session and send it back to My Plan?",
+      retry: "Retry this session?",
+      rollback: "Rollback this session?"
+    };
+
+    if (!confirmAction(confirmMessages[action])) {
+      return;
+    }
+
+    updateActiveWorkspace((workspace) => applyReviewAction(workspace, cardId, action));
+  };
+
   const handleStartCard = (cardId: string) => {
     const card = activeWorkspace.cards.find((item) => item.id === cardId);
     if (!card) {
@@ -653,6 +739,16 @@ export const App = () => {
   };
 
   const handleCancelExecution = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (isGeneratingPlanCard(card)) {
+      await handleCancelPlanGenerating(cardId);
+      return;
+    }
+
+    if (!confirmAction("Cancel this running session?")) {
+      return;
+    }
+
     await cliBridge.cancel(cardId);
     updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId));
   };
@@ -703,7 +799,16 @@ export const App = () => {
     setWarning("Start Implement queue completed.");
   };
 
-  const handleDeleteCard = (cardId: string) => {
+  const handleDeleteCard = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!confirmAction(`Delete "${card?.title ?? "this card"}"?`)) {
+      return;
+    }
+
+    if (isGeneratingPlanCard(card)) {
+      await stopPlanGeneration(card);
+    }
+
     updateActiveWorkspace((workspace) => deleteCard(workspace, cardId));
     setSelectedCardId(null);
   };
@@ -900,13 +1005,11 @@ export const App = () => {
           searchQuery={searchQuery}
           selectedCardId={selectedCardId}
           onCancelCard={handleCancelExecution}
-          onSelectCard={setSelectedCardId}
+          onSelectCard={handleSelectCard}
           onCreateCard={handleCreateCard}
           onMoveCard={handleMoveCard}
           onReorderCard={handleReorderCard}
-          onReviewAction={(cardId, action) =>
-            updateActiveWorkspace((workspace) => applyReviewAction(workspace, cardId, action))
-          }
+          onReviewAction={handleReviewAction}
           onStartCard={handleStartCard}
           onStartImplementAll={handleStartImplementAll}
         />
@@ -923,9 +1026,7 @@ export const App = () => {
         }
         onDeleteCard={handleDeleteCard}
         onDuplicateCard={handleDuplicateCard}
-        onReviewAction={(cardId, action) =>
-          updateActiveWorkspace((workspace) => applyReviewAction(workspace, cardId, action))
-        }
+        onReviewAction={handleReviewAction}
         onSimulateExecution={(cardId) =>
           updateActiveWorkspace((workspace) => {
             const result = simulateExecution(workspace, cardId);
@@ -947,13 +1048,9 @@ export const App = () => {
 
       {planPromptOpen ? (
         <PlanPromptModal
-          isGenerating={planGenerating}
+          isGenerating={false}
           workspace={activeWorkspace}
-          onClose={() => {
-            if (!planGenerating) {
-              setPlanPromptOpen(false);
-            }
-          }}
+          onClose={() => setPlanPromptOpen(false)}
           onManualSubmit={handleCreateManualPlan}
           onSubmit={handleCreatePlanFromPrompt}
         />

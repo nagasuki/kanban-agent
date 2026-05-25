@@ -931,6 +931,16 @@ label {
   transform: scale(0.99);
 }
 
+.kanban-card.locked {
+  cursor: default;
+  border-color: color-mix(in srgb, var(--warning) 38%, var(--border));
+}
+
+.kanban-card.locked:active,
+.kanban-card.locked:hover {
+  transform: none;
+}
+
 .kanban-card.dragging {
   opacity: 0.42;
   border-color: color-mix(in srgb, var(--accent) 70%, var(--border));

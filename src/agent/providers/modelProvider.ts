@@ -16,6 +16,7 @@ export interface ModelProviderClient {
     model: ModelProfile;
     onStream?: (message: string) => void;
     prompt: GeneratedPrompt;
+    signal?: AbortSignal;
   }) => Promise<PlanOnlyResult>;
   testConnection: (model: ModelProfile, apiKey?: string | null) => Promise<{ ok: boolean; message: string }>;
 }

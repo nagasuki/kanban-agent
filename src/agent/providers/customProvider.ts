@@ -4,7 +4,7 @@ export const customProvider: ModelProviderClient = {
   id: "custom-api",
   label: "Custom API",
 
-  runPlanOnly: async ({ apiKey, model, onStream, prompt }) => {
+  runPlanOnly: async ({ apiKey, model, onStream, prompt, signal }) => {
     if (!apiKey) {
       return {
         provider: "Custom API",
@@ -20,6 +20,7 @@ export const customProvider: ModelProviderClient = {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
+      signal,
       body: JSON.stringify({
         model: model.modelName,
         temperature: model.temperature,

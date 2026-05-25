@@ -7,7 +7,8 @@ import type { KanbanCard, Workspace } from "../domain/types";
 export const runPlanOnly = async (
   workspace: Workspace,
   card: KanbanCard,
-  onStream?: (message: string) => void
+  onStream?: (message: string) => void,
+  signal?: AbortSignal
 ) => {
   const model = workspace.modelProfiles.find((profile) => profile.id === card.modelProfileId);
   if (!model) {
@@ -26,7 +27,7 @@ export const runPlanOnly = async (
   const apiKey = apiKeyResult.ok ? apiKeyResult.value : null;
   const runningCard = workspace.cards.find((item) => item.id === card.id) ?? card;
   const activeSession = runningCard.sessions.find((session) => session.id === runningCard.activeSessionId);
-  const result = await getModelProviderClient(model.provider).runPlanOnly({ apiKey, model, onStream, prompt });
+  const result = await getModelProviderClient(model.provider).runPlanOnly({ apiKey, model, onStream, prompt, signal });
   if (!activeSession) {
     return result;
   }
@@ -49,7 +50,8 @@ export const runPlanOnly = async (
 export const runPlanDraft = async (
   workspace: Workspace,
   card: KanbanCard,
-  onStream?: (message: string) => void
+  onStream?: (message: string) => void,
+  signal?: AbortSignal
 ) => {
   const model = workspace.modelProfiles.find((profile) => profile.id === card.modelProfileId);
   if (!model) {
@@ -66,5 +68,5 @@ export const runPlanDraft = async (
   const prompt = buildPlanDraftPrompt(card, workspace, model, skills, agent, cliTool);
   const apiKeyResult = await secureKeyStore.get(secureKeyStore.keyForModel(model.id));
   const apiKey = apiKeyResult.ok ? apiKeyResult.value : null;
-  return getModelProviderClient(model.provider).runPlanOnly({ apiKey, model, onStream, prompt });
+  return getModelProviderClient(model.provider).runPlanOnly({ apiKey, model, onStream, prompt, signal });
 };

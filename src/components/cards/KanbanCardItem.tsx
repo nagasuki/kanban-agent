@@ -37,16 +37,36 @@ export const KanbanCardItem = ({
   const agent = workspace.agentProfiles.find((profile) => profile.id === card.agentProfileId);
   const latestSession = card.sessions.find((session) => session.id === card.activeSessionId) ?? card.sessions.at(-1);
   const columnTitle = BOARD_COLUMNS.find((column) => column.id === card.columnId)?.title ?? "Workflow";
+  const isGeneratingPlan = card.columnId === "my-plan" && card.locked;
 
   useEffect(() => {
-    if (card.columnId !== "in-process") {
+    if (card.columnId !== "in-process" && !isGeneratingPlan) {
       return undefined;
     }
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [card.columnId]);
+  }, [card.columnId, isGeneratingPlan]);
 
   const renderBody = () => {
+    if (isGeneratingPlan) {
+      const latestLog = card.activityLog.at(-1)?.message || "Waiting for planner response";
+      return (
+        <>
+          <div className="cli-status-card">
+            <span>Generating plan</span>
+            <span>{truncate(latestLog, 72)}</span>
+            <span>Elapsed: {formatCardElapsed(card)}</span>
+          </div>
+          <div className="card-inline-actions">
+            <button type="button" onClick={(event) => stopAndRun(event, () => onCancelCard(card.id))}>
+              <XCircle size={13} />
+              Cancel Plan
+            </button>
+          </div>
+        </>
+      );
+    }
+
     if (card.columnId === "start-implement") {
       const blockedDependencies = card.dependencyCardIds
         .map((dependencyId) => workspace.cards.find((item) => item.id === dependencyId))
@@ -161,12 +181,20 @@ export const KanbanCardItem = ({
   return (
     <article
       aria-label={`Open card detail for ${card.title}`}
-      className={`kanban-card ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
-      draggable
+      className={`kanban-card ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""} ${isGeneratingPlan ? "locked" : ""}`}
+      draggable={!isGeneratingPlan}
       role="button"
       tabIndex={0}
-      onClick={onSelect}
+      onClick={() => {
+        if (!isGeneratingPlan) {
+          onSelect();
+        }
+      }}
       onDragStart={(event) => {
+        if (isGeneratingPlan) {
+          event.preventDefault();
+          return;
+        }
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", card.id);
         onDragStart(card.id);
@@ -181,7 +209,9 @@ export const KanbanCardItem = ({
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onSelect();
+          if (!isGeneratingPlan) {
+            onSelect();
+          }
         }
       }}
     >
@@ -195,7 +225,7 @@ export const KanbanCardItem = ({
         {card.reviewChecklist.userApproved ? <CheckCircle2 className="success-icon" size={16} /> : null}
       </div>
       {renderBody()}
-      <div className="open-detail-hint">Click to open details</div>
+      <div className="open-detail-hint">{isGeneratingPlan ? "Generating plan. Cancel or wait." : "Click to open details"}</div>
     </article>
   );
 };
@@ -231,6 +261,13 @@ const formatTokens = (session: ImplementationSession | undefined) => {
     return `${(tokens / 1000).toFixed(1)}k`;
   }
   return `${tokens}`;
+};
+
+const formatCardElapsed = (card: KanbanCard) => {
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(card.createdAt).getTime()) / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
 };
 
 const formatCost = (session: ImplementationSession | undefined) => {
