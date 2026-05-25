@@ -55,17 +55,18 @@ export const cliBridge = {
       };
     }
 
+    const { onOutput, ...ipcOptions } = options;
     let unsubscribe: (() => void) | undefined;
-    if (options.onOutput && options.runId && window.kanbanAgent.cli.onOutput) {
+    if (onOutput && options.runId && window.kanbanAgent.cli.onOutput) {
       unsubscribe = window.kanbanAgent.cli.onOutput((event) => {
         if (event.runId === options.runId) {
-          options.onOutput?.(event);
+          onOutput(event);
         }
       });
     }
 
     try {
-      return await window.kanbanAgent.cli.run(options);
+      return await window.kanbanAgent.cli.run(ipcOptions);
     } finally {
       unsubscribe?.();
     }
