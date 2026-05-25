@@ -1,16 +1,18 @@
-````md
 <div align="center">
 
 # Kanban Agent
 
 ### AI-Powered Autonomous Development Workflow Platform
 
+<br/>
+
 <img src="https://img.shields.io/badge/status-active_development-orange" />
 <img src="https://img.shields.io/badge/platform-desktop-blue" />
 <img src="https://img.shields.io/badge/workflow-ai--native-purple" />
 <img src="https://img.shields.io/badge/license-TBD-lightgrey" />
 
----
+<br/>
+<br/>
 
 **Kanban Agent** is an AI-first Kanban workflow platform designed for modern software production pipelines.
 
@@ -26,12 +28,12 @@ Modern AI coding tools are powerful, but most workflows still happen in disconne
 
 Kanban Agent transforms AI development into a structured production pipeline by combining:
 
-- 🧠 Autonomous AI Agents
-- 📋 Kanban Workflow Management
-- 🔍 Integrated Review Systems
-- ⚡ Multi-Agent Execution
-- 🔌 MCP Integrations
-- 📊 Token & Runtime Tracking
+* 🧠 Autonomous AI Agents
+* 📋 Kanban Workflow Management
+* 🔍 Integrated Review Systems
+* ⚡ Multi-Agent Execution
+* 🔌 MCP Integrations
+* 📊 Token & Runtime Tracking
 
 Instead of:
 
@@ -61,7 +63,7 @@ In Review
 Approve / Reject
    ↓
 Done
-````
+```
 
 ---
 
@@ -202,13 +204,6 @@ Kanban Agent focuses on:
 * [ ] Persistent AI memory
 * [ ] Distributed execution
 
-## Future Vision
-
-* AI producer workflows
-* Autonomous sprint execution
-* Studio-scale orchestration
-* AI lead engineer pipelines
-
 ---
 
 # 🛠 Tech Stack
@@ -301,4 +296,3 @@ Created by [Nagasuki](https://github.com/nagasuki)
 ### Building the future of AI-assisted software production.
 
 </div>
-```
