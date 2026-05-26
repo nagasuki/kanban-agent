@@ -1181,6 +1181,7 @@ export const App = () => {
           searchQuery={searchQuery}
           selectedCardId={selectedCardId}
           onOpenSettings={() => setSettingsOpen(true)}
+          onApplyPatch={handleApplyPatch}
           onCancelCard={handleCancelExecution}
           onSelectCard={handleSelectCard}
           onCreateCard={handleCreateCard}

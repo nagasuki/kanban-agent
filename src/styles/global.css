@@ -1156,11 +1156,15 @@ label {
   background: var(--panel-2);
 }
 
-.review-card-actions button:first-child {
+.review-card-actions .apply-patch-action {
+  color: var(--accent);
+}
+
+.review-card-actions .approve-action {
   color: var(--success);
 }
 
-.review-card-actions button:last-child {
+.review-card-actions .reject-action {
   color: var(--danger);
 }
 

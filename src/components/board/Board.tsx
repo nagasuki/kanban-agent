@@ -15,6 +15,7 @@ interface BoardProps {
   searchQuery: string;
   selectedCardId: string | null;
   onOpenSettings?: () => void;
+  onApplyPatch: (cardId: string) => void;
   onCancelCard: (cardId: string) => void;
   onSelectCard: (cardId: string) => void;
   onCreateCard: (columnId: BoardColumnId) => void;
@@ -35,6 +36,7 @@ export const Board = ({
   searchQuery,
   selectedCardId,
   onOpenSettings,
+  onApplyPatch,
   onCancelCard,
   onSelectCard,
   onCreateCard,
@@ -231,6 +233,7 @@ export const Board = ({
                     isDragging={draggingCardId === card.id}
                     isSelected={selectedCardId === card.id}
                     workspace={workspace}
+                    onApplyPatch={onApplyPatch}
                     onCancelCard={onCancelCard}
                     onDragOverCard={(cardId, position) => setDropTarget({ cardId, position })}
                     onDragStart={setDraggingCardId}
