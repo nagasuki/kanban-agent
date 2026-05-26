@@ -92,6 +92,7 @@ declare global {
             command: string;
             cwd: string;
             environmentVariables?: string;
+            keepStdinOpen?: boolean;
             prompt: string;
             resolvedExecutablePath?: string;
             runId?: string;
@@ -107,6 +108,7 @@ declare global {
           resolvedExecutablePath?: string;
           logs?: Array<{ stream: "system" | "stdout" | "stderr"; chunk: string; timestamp: string }>;
         }>;
+        sendInput?: (options: { runId: string; input: string }) => Promise<{ ok: boolean; message: string }>;
         cancel?: (options: { runId: string }) => Promise<{ ok: boolean; message: string }>;
         test?: (
           options: {

@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld("kanbanAgent", {
   },
   cli: {
     run: (options) => ipcRenderer.invoke("cli:run", options),
+    sendInput: (options) => ipcRenderer.invoke("cli:input", options),
     cancel: (options) => ipcRenderer.invoke("cli:cancel", options),
     test: (options) => ipcRenderer.invoke("cli:test", options),
     onOutput: (callback) => {

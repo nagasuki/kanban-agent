@@ -12,6 +12,7 @@ export const createCliToolProfile = (workspace: Workspace): Workspace => {
     command: "agent",
     args: "",
     timeoutSeconds: 300,
+    keepStdinOpen: false,
     environmentVariables: "",
     workingDirectory: "",
     resolvedExecutablePath: "",

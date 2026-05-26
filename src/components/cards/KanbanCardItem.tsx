@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import { useEffect, useState } from "react";
-import { CheckCircle2, FileCheck2, Play, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Play, ShieldCheck, XCircle } from "lucide-react";
 import { BOARD_COLUMNS } from "../../domain/constants";
 import type { ImplementationSession, KanbanCard, Workspace } from "../../domain/types";
 
@@ -10,7 +10,6 @@ interface KanbanCardItemProps {
   columnIndex: number;
   isDragging: boolean;
   isSelected: boolean;
-  onApplyPatch: (cardId: string) => void;
   onCancelCard: (cardId: string) => void;
   onDragEnd: () => void;
   onDragOverCard: (cardId: string, position: "before" | "after") => void;
@@ -26,7 +25,6 @@ export const KanbanCardItem = ({
   columnIndex,
   isDragging,
   isSelected,
-  onApplyPatch,
   onCancelCard,
   onDragEnd,
   onDragOverCard,
@@ -104,8 +102,19 @@ export const KanbanCardItem = ({
       const elapsed = formatElapsed(latestSession);
       const liveStatus = latestSession?.logs.at(-1)?.message || "Session is running";
       const currentFile = latestSession ? currentFileLabel(latestSession) : "";
+      const pendingQuestion = card.pendingAgentQuestion;
       return (
         <>
+          {pendingQuestion ? (
+            <div className="agent-question-card">
+              <span>
+                <AlertTriangle size={13} />
+                Needs your answer
+              </span>
+              <p>{truncate(pendingQuestion.question, 120)}</p>
+              <small>Open this card to choose an answer.</small>
+            </div>
+          ) : null}
           <div className="cli-status-card">
             <span>Running: {latestSession?.currentStep || "Preparing session"}</span>
             <span>{latestSession?.status === "failed" ? "Failed" : truncate(liveStatus, 72)}</span>
@@ -141,15 +150,11 @@ export const KanbanCardItem = ({
             ))}
           </div>
           <div className="card-inline-actions review-card-actions">
-            <button className="approve-action" type="button" onClick={(event) => stopAndRun(event, () => onReviewAction(card.id, "approve"))}>
+            <button type="button" onClick={(event) => stopAndRun(event, () => onReviewAction(card.id, "approve"))}>
               <ShieldCheck size={13} />
               Approve
             </button>
-            <button className="apply-patch-action" type="button" onClick={(event) => stopAndRun(event, () => onApplyPatch(card.id))}>
-              <FileCheck2 size={13} />
-              Apply Patch
-            </button>
-            <button className="reject-action" type="button" onClick={(event) => stopAndRun(event, () => onReviewAction(card.id, "request-changes"))}>
+            <button type="button" onClick={(event) => stopAndRun(event, () => onReviewAction(card.id, "request-changes"))}>
               Reject
             </button>
           </div>
@@ -235,7 +240,9 @@ export const KanbanCardItem = ({
         {card.reviewChecklist.userApproved ? <CheckCircle2 className="success-icon" size={16} /> : null}
       </div>
       {renderBody()}
-      <div className="open-detail-hint">{isGeneratingPlan ? "Generating plan. Cancel or wait." : "Click to open details"}</div>
+      <div className="open-detail-hint">
+        {isGeneratingPlan ? "Generating plan. Cancel or wait." : card.pendingAgentQuestion ? "Open card to answer" : "Click to open details"}
+      </div>
     </article>
   );
 };

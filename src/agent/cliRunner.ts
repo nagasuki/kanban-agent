@@ -1,4 +1,5 @@
 import { cliBridge } from "../desktop/cliBridge";
+import { parseAgentChoiceQuestion, type ParsedAgentQuestion } from "../domain/agentQuestion";
 import { buildAgentPrompt, buildPlanDraftPrompt } from "../domain/promptBuilder";
 import {
   createProviderUsageRecord,
@@ -29,7 +30,7 @@ export const runCliAgent = async (
   workspace: Workspace,
   card: KanbanCard,
   profile: CliToolProfile,
-  onStream?: (message: string, usage?: CliLiveUsageEstimate) => void
+  onStream?: (message: string, usage?: CliLiveUsageEstimate, question?: ParsedAgentQuestion) => void
 ): Promise<CliAgentResult> => {
   const model = workspace.modelProfiles.find((item) => item.id === card.modelProfileId);
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
@@ -52,6 +53,7 @@ export const runCliAgent = async (
   const providerId = profile.providerId || profile.provider.toLowerCase().replace(/\s+/g, "-");
   const inputTokens = estimateTokensFromText(cliPrompt);
   let streamedOutput = "";
+  let lastQuestionSignature = "";
   const emitUsage = () => {
     const outputTokens = estimateTokensFromText(streamedOutput);
     onStream?.("", {
@@ -74,10 +76,17 @@ export const runCliAgent = async (
       const clean = event.chunk.trim();
       streamedOutput += event.chunk;
       emitUsage();
+      const question = parseAgentChoiceQuestion(streamedOutput);
+      const questionSignature = question ? `${question.question}\n${question.choices.join("\n")}` : "";
+      if (question && questionSignature !== lastQuestionSignature) {
+        lastQuestionSignature = questionSignature;
+        onStream?.("", undefined, question);
+      }
       if (clean) {
         onStream?.(`${event.stream}: ${clean.slice(0, 500)}`);
       }
     },
+    keepStdinOpen: Boolean(profile.keepStdinOpen),
     prompt: cliPrompt,
     timeoutSeconds: profile.timeoutSeconds
   });
@@ -122,7 +131,7 @@ export const runCliPlanDraft = async (
   workspace: Workspace,
   card: KanbanCard,
   profile: CliToolProfile,
-  onStream?: (message: string, usage?: CliLiveUsageEstimate) => void
+  onStream?: (message: string, usage?: CliLiveUsageEstimate, question?: ParsedAgentQuestion) => void
 ): Promise<CliAgentResult> => {
   const model = workspace.modelProfiles.find((item) => item.id === card.modelProfileId);
   const skills = workspace.skills.filter((skill) => card.skillIds.includes(skill.id));
@@ -142,6 +151,7 @@ export const runCliPlanDraft = async (
   const providerId = profile.providerId || profile.provider.toLowerCase().replace(/\s+/g, "-");
   const inputTokens = estimateTokensFromText(cliPrompt);
   let streamedOutput = "";
+  let lastQuestionSignature = "";
   const emitUsage = () => {
     const outputTokens = estimateTokensFromText(streamedOutput);
     onStream?.("", {
@@ -164,10 +174,17 @@ export const runCliPlanDraft = async (
       const clean = event.chunk.trim();
       streamedOutput += event.chunk;
       emitUsage();
+      const question = parseAgentChoiceQuestion(streamedOutput);
+      const questionSignature = question ? `${question.question}\n${question.choices.join("\n")}` : "";
+      if (question && questionSignature !== lastQuestionSignature) {
+        lastQuestionSignature = questionSignature;
+        onStream?.("", undefined, question);
+      }
       if (clean) {
         onStream?.(`${event.stream}: ${clean.slice(0, 500)}`);
       }
     },
+    keepStdinOpen: Boolean(profile.keepStdinOpen),
     prompt: cliPrompt,
     timeoutSeconds: profile.timeoutSeconds
   });

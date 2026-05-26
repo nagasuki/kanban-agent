@@ -1066,6 +1066,35 @@ label {
   color: var(--muted-2);
 }
 
+.agent-question-card {
+  display: grid;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--warning) 54%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface-sunken));
+  padding: 8px;
+}
+
+.agent-question-card span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.agent-question-card p {
+  min-height: auto;
+  color: var(--text-soft);
+}
+
+.agent-question-card small {
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .cli-validation-result {
   color: var(--muted-2);
   font-family: inherit;
@@ -1437,6 +1466,45 @@ label {
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.agent-question-panel {
+  border-top-color: color-mix(in srgb, var(--warning) 48%, var(--border));
+}
+
+.agent-question-panel h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--warning);
+}
+
+.agent-question-panel p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.agent-choice-list {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-choice-list button {
+  justify-content: flex-start;
+  min-height: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--panel-4);
+  color: var(--text-soft);
+  padding: 0 10px;
+  text-align: left;
+}
+
+.agent-choice-list button:hover {
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border-hover));
+  background: var(--panel-2);
 }
 
 .diff-viewer {

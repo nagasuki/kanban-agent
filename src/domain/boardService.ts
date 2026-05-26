@@ -10,6 +10,7 @@ import { buildExecutionPreview, createImplementationLogBurst } from "./execution
 import { createId, nowIso } from "./id";
 import type {
   BoardColumnId,
+  AgentChoiceQuestion,
   ImplementationSession,
   KanbanCard,
   ProviderUsageRecord,
@@ -397,6 +398,90 @@ export const appendCardLog = (
   };
 };
 
+export const setPendingAgentQuestion = (
+  workspace: Workspace,
+  cardId: string,
+  question: Pick<AgentChoiceQuestion, "question" | "choices" | "rawText">
+): Workspace => {
+  const timestamp = nowIso();
+  return {
+    ...workspace,
+    cards: workspace.cards.map((card) => {
+      if (card.id !== cardId) {
+        return card;
+      }
+
+      const sameQuestion =
+        card.pendingAgentQuestion?.question === question.question &&
+        card.pendingAgentQuestion.choices.join("\n") === question.choices.join("\n");
+      if (sameQuestion) {
+        return card;
+      }
+
+      const pendingQuestion: AgentChoiceQuestion = {
+        id: createId("question"),
+        question: question.question,
+        choices: question.choices,
+        rawText: question.rawText,
+        askedAt: timestamp
+      };
+      const log = createLogEntry("Agent is waiting for a choice answer", "warning");
+
+      return {
+        ...card,
+        pendingAgentQuestion: pendingQuestion,
+        sessions: card.sessions.map((session) =>
+          session.id === card.activeSessionId
+            ? {
+                ...session,
+                currentStep: "Waiting for your choice answer",
+                logs: [...session.logs, log],
+                updatedAt: timestamp
+              }
+            : session
+        ),
+        activityLog: [...card.activityLog, log],
+        updatedAt: timestamp
+      };
+    }),
+    updatedAt: timestamp
+  };
+};
+
+export const answerPendingAgentQuestion = (
+  workspace: Workspace,
+  cardId: string,
+  answer: string,
+  sentToCli: boolean
+): Workspace => {
+  const timestamp = nowIso();
+  const message = sentToCli ? `Choice answer sent: ${answer}` : `Choice answer could not be sent to CLI: ${answer}`;
+  return {
+    ...workspace,
+    cards: workspace.cards.map((card) =>
+      card.id === cardId
+        ? {
+            ...card,
+            pendingAgentQuestion: sentToCli ? undefined : card.pendingAgentQuestion,
+            sessions: card.sessions.map((session) =>
+              session.id === card.activeSessionId
+                ? {
+                    ...session,
+                    currentStep: sentToCli ? "Choice answer sent" : "Waiting for your choice answer",
+                    logs: [...session.logs, createLogEntry(message, sentToCli ? "info" : "warning")],
+                    updatedAt: timestamp
+                  }
+                : session
+            ),
+            activityLog: [...card.activityLog, createLogEntry(message, sentToCli ? "info" : "warning")],
+            updatedAt: timestamp
+          }
+        : card
+    ),
+    updatedAt: timestamp
+  };
+};
+
 export const updateActiveSessionUsage = (
   workspace: Workspace,
   cardId: string,
@@ -529,6 +614,7 @@ export const simulateExecution = (workspace: Workspace, cardId: string): MoveCar
         ...card,
         columnId: "in-review",
         locked: false,
+        pendingAgentQuestion: undefined,
         resultSummary: summary,
         diffPlaceholder: diffText,
         sessions: completeActiveSession(card, {
@@ -566,6 +652,7 @@ export const cancelExecution = (workspace: Workspace, cardId: string): Workspace
             ...card,
             columnId: "start-implement",
             locked: false,
+            pendingAgentQuestion: undefined,
             sessions: completeActiveSession(card, {
               status: "cancelled",
               summary: "Execution cancelled by user.",
@@ -608,6 +695,7 @@ export const completePlanOnlyExecution = (
             ...card,
             columnId: "in-review",
             locked: false,
+            pendingAgentQuestion: undefined,
             implementationCompletedAt: timestamp,
             resultSummary: result.summary,
             diffPlaceholder: result.rawText,
@@ -688,6 +776,7 @@ export const completeCliExecution = (
             ...card,
             columnId: "in-review",
             locked: false,
+            pendingAgentQuestion: undefined,
             implementationCompletedAt: timestamp,
             resultSummary: result.summary,
             diffPlaceholder: result.rawText,
@@ -997,6 +1086,7 @@ const startImplementationSession = (
               ...item,
               columnId: "in-process",
               locked: true,
+              pendingAgentQuestion: undefined,
               agentProfileId: implementAgent.id,
               implementAgentProfileId: implementAgent.id,
               implementationStartedAt: timestamp,

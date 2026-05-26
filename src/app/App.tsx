@@ -5,7 +5,7 @@ import { PlanPromptModal } from "../components/plans/PlanPromptModal";
 import { SettingsModal } from "../components/settings/SettingsModal";
 import { TopNav } from "../components/topnav/TopNav";
 import { runPlanDraft, runPlanOnly } from "../agent/agentRunner";
-import { runCliAgent, runCliPlanDraft } from "../agent/cliRunner";
+import { runCliAgent, runCliPlanDraft, type CliLiveUsageEstimate } from "../agent/cliRunner";
 import { cliBridge, type CliValidationResult } from "../desktop/cliBridge";
 import { repoBridge } from "../desktop/repoBridge";
 import { createAgentProfile, deleteAgentProfile, updateAgentProfile } from "../domain/agentService";
@@ -22,6 +22,7 @@ import { createDefaultCliToolProfiles } from "../domain/defaults";
 import {
   applyReviewAction,
   appendCardLog,
+  answerPendingAgentQuestion,
   cancelExecution,
   completePlanDraft,
   completePlanOnlyExecution,
@@ -39,10 +40,12 @@ import {
   simulateExecution,
   startCliExecution,
   startPlanOnlyExecution,
+  setPendingAgentQuestion,
   updateActiveSessionUsage,
   updateCard
 } from "../domain/boardService";
 import type { CreatePlanCardOptions } from "../domain/boardService";
+import type { ParsedAgentQuestion } from "../domain/agentQuestion";
 import { createId, nowIso } from "../domain/id";
 import { createModelProfile, deleteModelProfile, updateModelProfile } from "../domain/modelService";
 import { createSkill, deleteSkill, duplicateSkill, updateSkill } from "../domain/skillService";
@@ -100,6 +103,27 @@ export const App = () => {
       workspaces: current.workspaces.map((workspace) =>
         workspace.id === current.activeWorkspaceId ? updater(workspace) : workspace
       )
+    }));
+  };
+
+  const applyCliStreamUpdate = (
+    cardId: string,
+    message: string,
+    usage?: CliLiveUsageEstimate,
+    question?: ParsedAgentQuestion
+  ) => {
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) => {
+        if (workspace.id !== current.activeWorkspaceId) {
+          return workspace;
+        }
+        let nextWorkspace = usage ? updateActiveSessionUsage(workspace, cardId, usage) : workspace;
+        if (question) {
+          nextWorkspace = setPendingAgentQuestion(nextWorkspace, cardId, question);
+        }
+        return message ? appendCardLog(nextWorkspace, cardId, message) : nextWorkspace;
+      })
     }));
   };
 
@@ -643,17 +667,8 @@ export const App = () => {
     }));
 
     const runningCard = started.workspace.cards.find((item) => item.id === cardId) ?? card;
-    const result = await runCliAgent(started.workspace, runningCard, profile, (message, usage) => {
-      setState((current) => ({
-        ...current,
-        workspaces: current.workspaces.map((workspace) => {
-          if (workspace.id !== current.activeWorkspaceId) {
-            return workspace;
-          }
-          const withUsage = usage ? updateActiveSessionUsage(workspace, cardId, usage) : workspace;
-          return message ? appendCardLog(withUsage, cardId, message) : withUsage;
-        })
-      }));
+    const result = await runCliAgent(started.workspace, runningCard, profile, (message, usage, question) => {
+      applyCliStreamUpdate(cardId, message, usage, question);
     }).catch((error: unknown) => ({
       ok: false,
       provider: profile.name,
@@ -880,17 +895,8 @@ export const App = () => {
     }));
 
     const runningCard = started.workspace.cards.find((item) => item.id === cardId) ?? runCard;
-    const result = await runCliAgent(started.workspace, runningCard, profile, (message, usage) => {
-      setState((current) => ({
-        ...current,
-        workspaces: current.workspaces.map((item) => {
-          if (item.id !== current.activeWorkspaceId) {
-            return item;
-          }
-          const withUsage = usage ? updateActiveSessionUsage(item, cardId, usage) : item;
-          return message ? appendCardLog(withUsage, cardId, message) : withUsage;
-        })
-      }));
+    const result = await runCliAgent(started.workspace, runningCard, profile, (message, usage, question) => {
+      applyCliStreamUpdate(cardId, message, usage, question);
     }).catch((error: unknown) => ({
       ok: false,
       provider: profile.name,
@@ -922,6 +928,18 @@ export const App = () => {
 
     await cliBridge.cancel(cardId);
     updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId));
+  };
+
+  const handleAnswerAgentQuestion = async (cardId: string, answer: string) => {
+    const cleanAnswer = answer.trim();
+    if (!cleanAnswer) {
+      setWarning("Choose an answer before sending it to the agent.");
+      return;
+    }
+
+    const result = await cliBridge.sendInput(cardId, cleanAnswer);
+    updateActiveWorkspace((workspace) => answerPendingAgentQuestion(workspace, cardId, cleanAnswer, result.ok));
+    setWarning(result.ok ? null : result.message);
   };
 
   const handleTestCliTool = async (profile: CliToolProfile): Promise<CliValidationResult> => {
@@ -1216,6 +1234,7 @@ export const App = () => {
           })
         }
         onCancelExecution={handleCancelExecution}
+        onAnswerAgentQuestion={handleAnswerAgentQuestion}
         onRunPlanOnly={handleRunPlanOnly}
         onLoadAttachedFiles={handleLoadAttachedFiles}
         onRunCliAgent={handleRunCliAgent}

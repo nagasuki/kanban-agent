@@ -3,6 +3,7 @@ export interface CliRunOptions {
   command: string;
   cwd: string;
   environmentVariables?: string;
+  keepStdinOpen?: boolean;
   onOutput?: (event: CliOutputEvent) => void;
   prompt: string;
   resolvedExecutablePath?: string;
@@ -70,6 +71,13 @@ export const cliBridge = {
     } finally {
       unsubscribe?.();
     }
+  },
+
+  sendInput: async (runId: string, input: string): Promise<{ ok: boolean; message: string }> => {
+    if (!window.kanbanAgent?.cli?.sendInput) {
+      return { ok: false, message: "Live CLI input is only available in the Electron desktop app." };
+    }
+    return window.kanbanAgent.cli.sendInput({ runId, input });
   },
 
   cancel: async (runId: string): Promise<{ ok: boolean; message: string }> => {

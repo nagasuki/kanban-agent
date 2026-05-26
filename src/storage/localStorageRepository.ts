@@ -123,6 +123,7 @@ const normalizeCard = (card: KanbanCard, workspace: AppState["workspaces"][numbe
     prDescription: card.prDescription ?? "",
     prUrl: card.prUrl ?? "",
     locked: card.locked ?? false,
+    pendingAgentQuestion: card.pendingAgentQuestion,
     planCompletedAt: card.planCompletedAt,
     implementationStartedAt: card.implementationStartedAt,
     implementationCompletedAt: card.implementationCompletedAt,
