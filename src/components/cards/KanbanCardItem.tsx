@@ -152,13 +152,13 @@ export const KanbanCardItem = ({
             ))}
           </div>
           <div className="card-inline-actions review-card-actions">
-            <button className="approve-action" type="button" onClick={(event) => stopAndRun(event, () => onReviewAction(card.id, "approve"))}>
-              <ShieldCheck size={13} />
-              Approve
-            </button>
             <button className="apply-patch-action" type="button" onClick={(event) => stopAndRun(event, () => onApplyPatch(card.id))}>
               <FileCheck2 size={13} />
               Apply Patch
+            </button>
+            <button className="approve-action" type="button" onClick={(event) => stopAndRun(event, () => onReviewAction(card.id, "approve"))}>
+              <ShieldCheck size={13} />
+              Approve
             </button>
             <button className="reject-action" type="button" onClick={(event) => stopAndRun(event, () => onReviewAction(card.id, "request-changes"))}>
               Reject

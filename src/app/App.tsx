@@ -1012,11 +1012,6 @@ export const App = () => {
       return;
     }
 
-    if (!card.reviewChecklist.userApproved) {
-      setWarning("Approve the review checklist before applying a patch.");
-      return;
-    }
-
     const latestSession = card.sessions.find((session) => session.id === card.activeSessionId) ?? card.sessions.at(-1);
     const patchText = extractPatchForApply([card.patchText, latestSession?.diffText, card.diffPlaceholder]);
     if (!patchText.trim()) {
