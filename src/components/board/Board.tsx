@@ -17,8 +17,9 @@ interface BoardProps {
   onOpenSettings?: () => void;
   onApplyPatch: (cardId: string) => void;
   onCancelCard: (cardId: string) => void;
+  onPauseCard: (cardId: string) => void;
   onSelectCard: (cardId: string) => void;
-  onCreateCard: (columnId: BoardColumnId) => void;
+  onCreateCard: (columnId: BoardColumnId) => void | Promise<void>;
   onColumnAgentChange: (columnId: "my-plan" | "start-implement", agentId: string) => void;
   onMoveCard: (cardId: string, targetColumnId: BoardColumnId) => void;
   onReorderCard: (cardId: string, targetColumnId: BoardColumnId, targetIndex: number) => void;
@@ -38,6 +39,7 @@ export const Board = ({
   onOpenSettings,
   onApplyPatch,
   onCancelCard,
+  onPauseCard,
   onSelectCard,
   onCreateCard,
   onColumnAgentChange,
@@ -235,6 +237,7 @@ export const Board = ({
                     workspace={workspace}
                     onApplyPatch={onApplyPatch}
                     onCancelCard={onCancelCard}
+                    onPauseCard={onPauseCard}
                     onDragOverCard={(cardId, position) => setDropTarget({ cardId, position })}
                     onDragStart={setDraggingCardId}
                     onDragEnd={() => {

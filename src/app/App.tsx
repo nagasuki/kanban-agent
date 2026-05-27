@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Board } from "../components/board/Board";
 import { CardDetailModal } from "../components/drawer/CardDetailDrawer";
+import { PauseResumeModal } from "../components/drawer/PauseResumeModal";
 import { PlanPromptModal } from "../components/plans/PlanPromptModal";
 import { SettingsModal } from "../components/settings/SettingsModal";
 import { TopNav } from "../components/topnav/TopNav";
@@ -34,6 +35,7 @@ import {
   moveCard,
   reorderCard,
   generatePrDraft,
+  pauseExecution,
   recordCommandResult,
   recordPatchApplyResult,
   recordPrResult,
@@ -49,7 +51,7 @@ import type { ParsedAgentQuestion } from "../domain/agentQuestion";
 import { createId, nowIso } from "../domain/id";
 import { createModelProfile, deleteModelProfile, updateModelProfile } from "../domain/modelService";
 import { createSkill, deleteSkill, duplicateSkill, updateSkill } from "../domain/skillService";
-import type { AppState, BoardColumnId, CliToolProfile, KanbanCard, SessionRetryMode, Workspace } from "../domain/types";
+import type { AppState, BoardColumnId, CliToolProfile, FileTreeNode, KanbanCard, ProjectContext, SessionRetryMode, Workspace } from "../domain/types";
 import { loadAppState, resetAppState, saveAppState } from "../storage/localStorageRepository";
 import { loadThemeMode, resolveThemeMode, saveThemeMode, type ThemeMode } from "./theme";
 
@@ -65,8 +67,12 @@ export const App = () => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [planPromptOpen, setPlanPromptOpen] = useState(false);
   const cancelledPlanIdsRef = useRef<Set<string>>(new Set());
+  const pausedCardIdsRef = useRef<Set<string>>(new Set());
+  const ignoredPausedSessionIdsRef = useRef<Set<string>>(new Set());
   const planAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const implementationAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadThemeMode());
+  const [pauseCardId, setPauseCardId] = useState<string | null>(null);
 
   useEffect(() => {
     saveAppState(state);
@@ -96,6 +102,7 @@ export const App = () => {
   );
 
   const selectedCard = activeWorkspace?.cards.find((card) => card.id === selectedCardId);
+  const pauseCard = activeWorkspace?.cards.find((card) => card.id === pauseCardId);
 
   const updateActiveWorkspace = (updater: (workspace: Workspace) => Workspace) => {
     setState((current) => ({
@@ -210,6 +217,48 @@ export const App = () => {
     };
   };
 
+  const canCompleteSession = (workspace: Workspace, cardId: string, sessionId: string | undefined): boolean => {
+    const activeSessionId = workspace.cards.find((card) => card.id === cardId)?.activeSessionId;
+    return Boolean(sessionId && activeSessionId === sessionId && !ignoredPausedSessionIdsRef.current.has(sessionId));
+  };
+
+  const buildAutoPlanContext = async (workspace: Workspace, prompt: string): Promise<Partial<ProjectContext>> => {
+    const candidates = selectContextFiles(workspace, prompt);
+    const autoAttachedFiles = candidates.filter((candidate) => candidate.score >= 8).slice(0, 8).map((candidate) => candidate.path);
+    const suggestedFiles = candidates.slice(0, 18).map((candidate) => candidate.path);
+    const loaded: Array<{ path: string; content: string }> = [];
+    let totalChars = 0;
+
+    for (const relativePath of autoAttachedFiles) {
+      if (totalChars >= 40000) {
+        break;
+      }
+
+      const result = await repoBridge.readFile({
+        allowedEditableFolders: workspace.allowedEditableFolders,
+        blockedFilePatterns: workspace.blockedFilePatterns,
+        relativePath,
+        repoPath: workspace.repoPath
+      });
+      if (!result.ok) {
+        continue;
+      }
+
+      const remaining = Math.max(0, 40000 - totalChars);
+      const content = result.content.slice(0, remaining);
+      totalChars += content.length;
+      loaded.push({ path: relativePath, content });
+    }
+
+    return {
+      targetFiles: autoAttachedFiles.join(", "),
+      attachedFileContext: loaded.map((item) => [`# ${item.path}`, item.content].join("\n")).join("\n\n---\n\n"),
+      suggestedContextFiles: suggestedFiles,
+      autoAttachedContextFiles: loaded.map((item) => item.path),
+      notes: suggestedFiles.length > 0 ? `Suggested context: ${suggestedFiles.join(", ")}` : ""
+    };
+  };
+
   if (!activeWorkspace) {
     return null;
   }
@@ -306,12 +355,20 @@ export const App = () => {
     }));
   };
 
-  const handleCreateCard = (columnId: BoardColumnId) => {
+  const handleCreateCard = async (columnId: BoardColumnId) => {
     if (columnId === "my-plan") {
       if (!selectedPlanColumnAgentId) {
         setWarning("No Plan Agent is configured. Please set up a Plan Agent first.");
         return;
       }
+      const inspected = await inspectWorkspaceRepo(activeWorkspace);
+      setWarning(inspected.repoInspection?.warnings[0] ?? null);
+      setState((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((workspace) =>
+          workspace.id === current.activeWorkspaceId ? inspected : workspace
+        )
+      }));
       setPlanPromptOpen(true);
       return;
     }
@@ -327,9 +384,17 @@ export const App = () => {
   };
 
   const handleCreatePlanFromPrompt = async (prompt: string, options: CreatePlanCardOptions) => {
-    const created = createPlanCardFromPrompt(activeWorkspace, prompt, options);
-    setWarning(created.warning ?? null);
+    const refreshedWorkspace = await inspectWorkspaceRepo(activeWorkspace);
+    const autoContext = await buildAutoPlanContext(refreshedWorkspace, prompt);
+    const created = createPlanCardFromPrompt(refreshedWorkspace, prompt, { ...options, projectContext: autoContext });
+    setWarning(created.warning ?? refreshedWorkspace.repoInspection?.warnings[0] ?? null);
     if (created.warning || !created.cardId) {
+      setState((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((workspace) =>
+          workspace.id === current.activeWorkspaceId ? refreshedWorkspace : workspace
+        )
+      }));
       return;
     }
 
@@ -416,10 +481,18 @@ export const App = () => {
     setWarning(result.ok ? null : result.rawText);
   };
 
-  const handleCreateManualPlan = (prompt: string, options: CreatePlanCardOptions) => {
-    const created = createPlanCardFromPrompt(activeWorkspace, prompt, options);
-    setWarning(created.warning ?? null);
+  const handleCreateManualPlan = async (prompt: string, options: CreatePlanCardOptions) => {
+    const refreshedWorkspace = await inspectWorkspaceRepo(activeWorkspace);
+    const autoContext = await buildAutoPlanContext(refreshedWorkspace, prompt);
+    const created = createPlanCardFromPrompt(refreshedWorkspace, prompt, { ...options, projectContext: autoContext });
+    setWarning(created.warning ?? refreshedWorkspace.repoInspection?.warnings[0] ?? null);
     if (created.warning || !created.cardId) {
+      setState((current) => ({
+        ...current,
+        workspaces: current.workspaces.map((workspace) =>
+          workspace.id === current.activeWorkspaceId ? refreshedWorkspace : workspace
+        )
+      }));
       return;
     }
 
@@ -502,12 +575,62 @@ export const App = () => {
     }));
   };
 
+  const loadLatestAttachedFileContext = async (workspace: Workspace, card: KanbanCard) => {
+    const files = card.projectContext.targetFiles
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    if (files.length === 0) {
+      return { projectContext: card.projectContext, warning: null };
+    }
+
+    const loaded = await Promise.all(
+      files.map(async (relativePath) => ({
+        relativePath,
+        result: await repoBridge.readFile({
+          allowedEditableFolders: workspace.allowedEditableFolders,
+          blockedFilePatterns: workspace.blockedFilePatterns,
+          relativePath,
+          repoPath: card.projectContext.repoPath || workspace.repoPath
+        })
+      }))
+    );
+
+    const firstFailure = loaded.find((item) => !item.result.ok);
+    const attachedFileContext = loaded
+      .filter((item) => item.result.ok)
+      .map((item) => [`# ${item.relativePath}`, item.result.content].join("\n"))
+      .join("\n\n---\n\n");
+
+    return {
+      projectContext: {
+        ...card.projectContext,
+        attachedFileContext
+      },
+      warning: firstFailure?.result.message ?? null
+    };
+  };
+
   const handleRunPlanOnly = async (cardId: string, retryMode: SessionRetryMode = "fresh") => {
-    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    const refreshedWorkspace = await inspectWorkspaceRepo(activeWorkspace);
+    const card = refreshedWorkspace.cards.find((item) => item.id === cardId);
     if (!card) {
       return;
     }
-    const implementAgent = resolveImplementAgentForCard(card, activeWorkspace, selectedImplementColumnAgentId);
+    const latestFileContext = await loadLatestAttachedFileContext(refreshedWorkspace, card);
+    const workspaceWithFreshFiles = updateCard(refreshedWorkspace, cardId, {
+      projectContext: latestFileContext.projectContext
+    });
+    const cardWithFreshFiles = workspaceWithFreshFiles.cards.find((item) => item.id === cardId) ?? card;
+    setWarning(latestFileContext.warning ?? refreshedWorkspace.repoInspection?.warnings[0] ?? null);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? workspaceWithFreshFiles : workspace
+      )
+    }));
+    const implementAgent = resolveImplementAgentForCard(cardWithFreshFiles, workspaceWithFreshFiles, selectedImplementColumnAgentId);
     if (!supportsImplementMode(implementAgent)) {
       setWarning("No Implement Agent is configured. Please set up an Implement Agent first.");
       return;
@@ -517,13 +640,13 @@ export const App = () => {
       return;
     }
 
-    const workspaceForRun = updateCard(activeWorkspace, cardId, {
+    const workspaceForRun = updateCard(workspaceWithFreshFiles, cardId, {
       agentProfileId: implementAgent.id,
       implementAgentProfileId: implementAgent.id,
       skillIds: implementAgent.skillIds,
       runnerType: implementAgent.defaultRunnerType,
-      modelProfileId: implementAgent.defaultModelProfileId || activeWorkspace.defaultModelProfileId,
-      cliToolProfileId: implementAgent.defaultCliToolProfileId || activeWorkspace.defaultCliToolProfileId || undefined,
+      modelProfileId: implementAgent.defaultModelProfileId || refreshedWorkspace.defaultModelProfileId,
+      cliToolProfileId: implementAgent.defaultCliToolProfileId || refreshedWorkspace.defaultCliToolProfileId || undefined,
       executionMode: implementAgent.defaultExecutionMode
     });
     const started = startPlanOnlyExecution(workspaceForRun, cardId, retryMode);
@@ -545,6 +668,9 @@ export const App = () => {
     }));
 
     const runningCard = started.workspace.cards.find((item) => item.id === cardId) ?? card;
+    const startedSessionId = runningCard.activeSessionId;
+    const abortController = new AbortController();
+    implementationAbortControllersRef.current.set(cardId, abortController);
     const result = await runPlanOnly(started.workspace, runningCard, (message) => {
       setState((current) => ({
         ...current,
@@ -552,15 +678,20 @@ export const App = () => {
           workspace.id === current.activeWorkspaceId ? appendCardLog(workspace, cardId, message) : workspace
         )
       }));
-    }).catch((error: unknown) => ({
+    }, abortController.signal).catch((error: unknown) => ({
       provider: "runner",
-      summary: "Plan Only execution failed.",
-      rawText: error instanceof Error ? error.message : "Unknown Plan Only execution error."
+      summary: abortController.signal.aborted ? "Plan Only execution paused." : "Plan Only execution failed.",
+      rawText: abortController.signal.aborted ? "Execution paused by user." : error instanceof Error ? error.message : "Unknown Plan Only execution error."
     }));
+    implementationAbortControllersRef.current.delete(cardId);
     setState((current) => ({
       ...current,
       workspaces: current.workspaces.map((workspace) =>
-        workspace.id === current.activeWorkspaceId ? completePlanOnlyExecution(workspace, cardId, result) : workspace
+        workspace.id === current.activeWorkspaceId
+          ? canCompleteSession(workspace, cardId, startedSessionId)
+            ? completePlanOnlyExecution(workspace, cardId, result)
+            : workspace
+          : workspace
       )
     }));
   };
@@ -667,6 +798,7 @@ export const App = () => {
     }));
 
     const runningCard = started.workspace.cards.find((item) => item.id === cardId) ?? card;
+    const startedSessionId = runningCard.activeSessionId;
     const result = await runCliAgent(started.workspace, runningCard, profile, (message, usage, question) => {
       applyCliStreamUpdate(cardId, message, usage, question);
     }).catch((error: unknown) => ({
@@ -677,12 +809,12 @@ export const App = () => {
       resolvedExecutablePath: undefined,
       executionLogs: []
     }));
-
     setState((current) => ({
       ...current,
       workspaces: current.workspaces.map((workspace) =>
         workspace.id === current.activeWorkspaceId
-          ? workspace.cards.find((item) => item.id === cardId)?.columnId === "in-process"
+          ? canCompleteSession(workspace, cardId, startedSessionId) &&
+            workspace.cards.find((item) => item.id === cardId)?.columnId === "in-process"
             ? result.resolvedExecutablePath
               ? updateCliToolProfile(completeCliExecution(workspace, cardId, result), profile.id, {
                   resolvedExecutablePath: result.resolvedExecutablePath
@@ -819,7 +951,11 @@ export const App = () => {
     }));
   };
 
-  const runImplementationFromWorkspace = async (workspace: Workspace, cardId: string): Promise<Workspace> => {
+  const runImplementationFromWorkspace = async (
+    workspace: Workspace,
+    cardId: string,
+    retryMode: SessionRetryMode = "fresh"
+  ): Promise<Workspace> => {
     const card = workspace.cards.find((item) => item.id === cardId);
     if (!card) {
       return workspace;
@@ -841,7 +977,7 @@ export const App = () => {
     const runCard = workspaceForRun.cards.find((item) => item.id === cardId) ?? card;
 
     if (implementAgent.defaultRunnerType === "api") {
-      const started = startPlanOnlyExecution(workspaceForRun, cardId, "fresh");
+      const started = startPlanOnlyExecution(workspaceForRun, cardId, retryMode);
       setWarning(started.warning ?? null);
       if (started.warning) {
         return started.workspace;
@@ -856,6 +992,9 @@ export const App = () => {
       }));
 
       const runningCard = runningWorkspace.cards.find((item) => item.id === cardId) ?? runCard;
+      const startedSessionId = runningCard.activeSessionId;
+      const abortController = new AbortController();
+      implementationAbortControllersRef.current.set(cardId, abortController);
       const result = await runPlanOnly(runningWorkspace, runningCard, (message) => {
         runningWorkspace = appendCardLog(runningWorkspace, cardId, message);
         setState((current) => ({
@@ -864,11 +1003,15 @@ export const App = () => {
             item.id === current.activeWorkspaceId ? runningWorkspace : item
           )
         }));
-      }).catch((error: unknown) => ({
+      }, abortController.signal).catch((error: unknown) => ({
         provider: "runner",
-        summary: "Plan Only execution failed.",
-        rawText: error instanceof Error ? error.message : "Unknown Plan Only execution error."
+        summary: abortController.signal.aborted ? "Plan Only execution paused." : "Plan Only execution failed.",
+        rawText: abortController.signal.aborted ? "Execution paused by user." : error instanceof Error ? error.message : "Unknown Plan Only execution error."
       }));
+      implementationAbortControllersRef.current.delete(cardId);
+      if (!canCompleteSession(runningWorkspace, cardId, startedSessionId)) {
+        return runningWorkspace;
+      }
 
       return completePlanOnlyExecution(runningWorkspace, cardId, result);
     }
@@ -881,7 +1024,7 @@ export const App = () => {
       return appendCardLog(workspace, cardId, "Queued implementation skipped: no CLI profile selected", "warning");
     }
 
-    const started = startCliExecution(workspaceForRun, cardId, "fresh");
+    const started = startCliExecution(workspaceForRun, cardId, retryMode);
     setWarning(started.warning ?? null);
     if (started.warning) {
       return started.workspace;
@@ -895,6 +1038,7 @@ export const App = () => {
     }));
 
     const runningCard = started.workspace.cards.find((item) => item.id === cardId) ?? runCard;
+    const startedSessionId = runningCard.activeSessionId;
     const result = await runCliAgent(started.workspace, runningCard, profile, (message, usage, question) => {
       applyCliStreamUpdate(cardId, message, usage, question);
     }).catch((error: unknown) => ({
@@ -905,6 +1049,9 @@ export const App = () => {
       resolvedExecutablePath: undefined,
       executionLogs: []
     }));
+    if (!canCompleteSession(started.workspace, cardId, startedSessionId)) {
+      return started.workspace;
+    }
 
     return started.workspace.cards.find((item) => item.id === cardId)?.columnId === "in-process"
       ? result.resolvedExecutablePath
@@ -928,6 +1075,52 @@ export const App = () => {
 
     await cliBridge.cancel(cardId);
     updateActiveWorkspace((workspace) => cancelExecution(workspace, cardId));
+  };
+
+  const handlePauseExecution = async (cardId: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card || card.columnId !== "in-process") {
+      return;
+    }
+
+    pausedCardIdsRef.current.add(cardId);
+    if (card.activeSessionId) {
+      ignoredPausedSessionIdsRef.current.add(card.activeSessionId);
+    }
+    implementationAbortControllersRef.current.get(cardId)?.abort();
+    implementationAbortControllersRef.current.delete(cardId);
+    if (card.runnerType === "cli") {
+      await cliBridge.cancel(cardId);
+    }
+    updateActiveWorkspace((workspace) => pauseExecution(workspace, cardId));
+    setPauseCardId(cardId);
+    setSelectedCardId(null);
+    setWarning("Session paused. Add guidance and resume when ready.");
+  };
+
+  const handleResumeExecution = async (cardId: string, guidance: string) => {
+    const card = activeWorkspace.cards.find((item) => item.id === cardId);
+    if (!card) {
+      return;
+    }
+
+    pausedCardIdsRef.current.delete(cardId);
+    const workspaceWithGuidance = pauseExecution(activeWorkspace, cardId, guidance);
+    setPauseCardId(null);
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? workspaceWithGuidance : workspace
+      )
+    }));
+
+    const completedWorkspace = await runImplementationFromWorkspace(workspaceWithGuidance, cardId, "continue");
+    setState((current) => ({
+      ...current,
+      workspaces: current.workspaces.map((workspace) =>
+        workspace.id === current.activeWorkspaceId ? completedWorkspace : workspace
+      )
+    }));
   };
 
   const handleAnswerAgentQuestion = async (cardId: string, answer: string) => {
@@ -1196,6 +1389,7 @@ export const App = () => {
           onOpenSettings={() => setSettingsOpen(true)}
           onApplyPatch={handleApplyPatch}
           onCancelCard={handleCancelExecution}
+          onPauseCard={handlePauseExecution}
           onSelectCard={handleSelectCard}
           onCreateCard={handleCreateCard}
           onColumnAgentChange={handleColumnAgentChange}
@@ -1229,6 +1423,7 @@ export const App = () => {
           })
         }
         onCancelExecution={handleCancelExecution}
+        onPauseExecution={handlePauseExecution}
         onAnswerAgentQuestion={handleAnswerAgentQuestion}
         onRunPlanOnly={handleRunPlanOnly}
         onLoadAttachedFiles={handleLoadAttachedFiles}
@@ -1240,6 +1435,14 @@ export const App = () => {
         onRollbackFiles={handleRollbackFiles}
         onCreatePr={handleCreatePr}
       />
+
+      {pauseCard ? (
+        <PauseResumeModal
+          card={pauseCard}
+          onClose={() => setPauseCardId(null)}
+          onResume={handleResumeExecution}
+        />
+      ) : null}
 
       {planPromptOpen ? (
         <PlanPromptModal
@@ -1318,6 +1521,67 @@ const extractPatchForApply = (values: Array<string | undefined>): string => {
 
   return "";
 };
+
+const selectContextFiles = (workspace: Workspace, prompt: string): Array<{ path: string; score: number }> => {
+  const files = flattenFileTree(workspace.repoInspection?.fileTree ?? []).filter((node) => node.type === "file" && !node.blocked);
+  const changedFiles = new Set((workspace.repoInspection?.changedFiles ?? []).map(cleanChangedFilePath).filter(Boolean));
+  const promptTokens = tokenizePrompt(prompt);
+  const promptFileNames = new Set([...prompt.matchAll(/[\w.-]+\.[A-Za-z0-9]+/g)].map((match) => match[0].toLowerCase()));
+  const usefulNames = new Set(["package.json", "vite.config.ts", "tsconfig.json", "README.md", "README"]);
+
+  return files
+    .map((file) => {
+      const pathLower = file.path.toLowerCase();
+      const nameLower = file.name.toLowerCase();
+      let score = 0;
+      if (changedFiles.has(file.path) || changedFiles.has(pathLower)) score += 10;
+      if (promptFileNames.has(nameLower)) score += 9;
+      if ([...promptFileNames].some((name) => pathLower.endsWith(`/${name}`))) score += 8;
+      for (const token of promptTokens) {
+        if (nameLower.includes(token)) score += 3;
+        else if (pathLower.includes(token)) score += 1;
+      }
+      if (usefulNames.has(file.name) || usefulNames.has(nameLower)) score += 2;
+      if (!isLikelyTextContextFile(file.path)) score -= 12;
+      return { path: file.path, score };
+    })
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path));
+};
+
+const flattenFileTree = (nodes: FileTreeNode[]): FileTreeNode[] =>
+  nodes.flatMap((node) => [node, ...(node.children ? flattenFileTree(node.children) : [])]);
+
+const tokenizePrompt = (prompt: string): string[] =>
+  Array.from(new Set(prompt.toLowerCase().match(/[a-z0-9_/-]{3,}/g) ?? []))
+    .map((token) => token.replace(/^\/+|\/+$/g, ""))
+    .filter((token) => token.length >= 3 && !commonContextWords.has(token));
+
+const cleanChangedFilePath = (value: string): string => {
+  const clean = value.replace(/^[MADRCU?!\s]+/, "").trim().replace(/\\/g, "/");
+  return clean.includes(" -> ") ? clean.split(" -> ").at(-1)?.trim().toLowerCase() ?? "" : clean.toLowerCase();
+};
+
+const isLikelyTextContextFile = (filePath: string): boolean =>
+  /\.(c|cc|cpp|cs|css|go|h|html|java|js|jsx|json|less|mjs|md|py|rs|scss|ts|tsx|txt|xml|yaml|yml)$/i.test(filePath) ||
+  /(^|\/)(Dockerfile|Makefile|README|LICENSE)$/i.test(filePath);
+
+const commonContextWords = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "that",
+  "this",
+  "from",
+  "into",
+  "ทำ",
+  "ให้",
+  "แบบ",
+  "แล้ว",
+  "ต้อง",
+  "ควร"
+]);
 
 const extractPatchCandidate = (value: string): string => {
   const lines = value.split(/\r?\n/);

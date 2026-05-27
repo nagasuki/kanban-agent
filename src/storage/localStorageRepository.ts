@@ -134,7 +134,9 @@ const normalizeCard = (card: KanbanCard, workspace: AppState["workspaces"][numbe
     },
     projectContext: {
       ...createDefaultProjectContext(workspace.repoPath),
-      ...card.projectContext
+      ...card.projectContext,
+      suggestedContextFiles: card.projectContext?.suggestedContextFiles ?? [],
+      autoAttachedContextFiles: card.projectContext?.autoAttachedContextFiles ?? []
     }
   };
 

@@ -1,4 +1,4 @@
-import type { AgentProfile, CliToolProfile, KanbanCard, ModelProfile, SkillPreset, Workspace } from "./types";
+import type { AgentProfile, CliToolProfile, FileTreeNode, KanbanCard, ModelProfile, SkillPreset, Workspace } from "./types";
 
 export interface GeneratedPrompt {
   systemPrompt: string;
@@ -17,6 +17,7 @@ export const buildAgentPrompt = (
   const skillMarkdown = skills.length > 0 ? skills.map(formatSkillMarkdown).join("\n\n") : "No skill preset selected.";
   const safetyInstructions = buildSafetyInstructions(card, workspace);
   const agentRole = card.columnId === "my-plan" || card.executionMode === "Plan Only" ? "planning" : "implementation";
+  const repoContext = buildRepoContext(workspace);
 
   const systemPrompt = [
     `You are a ${agentRole} agent controlled by kanban-agent.`,
@@ -40,6 +41,9 @@ export const buildAgentPrompt = (
     `Workspace: ${workspace.name}`,
     `Repo path: ${card.projectContext.repoPath || workspace.repoPath || "Not set"}`,
     `Default branch: ${workspace.defaultBranch || "Not set"}`,
+    `Current branch: ${workspace.repoInspection?.currentBranch || workspace.defaultBranch || "Not set"}`,
+    `Local repo scan: ${workspace.repoInspection?.scannedAt || "Not scanned"}`,
+    repoContext,
     `Runner: ${card.runnerType === "cli" ? "CLI" : "API Model"}`,
     `API model: ${model ? `${model.provider} / ${model.modelName}` : "Not set"}`,
     `CLI tool: ${cliTool ? `${cliTool.provider} / ${cliTool.name}` : "Not set"}`,
@@ -47,6 +51,8 @@ export const buildAgentPrompt = (
     `Target paths: ${card.projectContext.targetPaths || "Not set"}`,
     `Target files: ${card.projectContext.targetFiles || "Not set"}`,
     `Target folders: ${card.projectContext.targetFolders || "Not set"}`,
+    `Auto-attached context files: ${card.projectContext.autoAttachedContextFiles.join(", ") || "None"}`,
+    `Suggested context files: ${card.projectContext.suggestedContextFiles.join(", ") || "None"}`,
     `Related documents: ${card.projectContext.relatedDocuments || "Not set"}`,
     `Related issue: ${card.projectContext.relatedIssueLink || "Not set"}`,
     `Test command: ${workspace.testCommand || "Not set"}`,
@@ -106,6 +112,43 @@ export const buildPlanDraftPrompt = (
 
 const formatSkillMarkdown = (skill: SkillPreset): string =>
   [`## ${skill.name} v${skill.version}`, skill.description, "", skill.markdown].join("\n");
+
+const buildRepoContext = (workspace: Workspace): string => {
+  const inspection = workspace.repoInspection;
+  if (!inspection) {
+    return "Local repository context: Not scanned.";
+  }
+
+  const changedFiles =
+    inspection.changedFiles.length > 0 ? inspection.changedFiles.slice(0, 40).join(", ") : "No changed files detected.";
+  const fileTree = formatFileTree(inspection.fileTree, 80);
+  return [
+    `Version control: ${inspection.versionControlProvider}`,
+    `Changed files: ${changedFiles}`,
+    "Local file tree:",
+    fileTree || "No local files listed."
+  ].join("\n");
+};
+
+const formatFileTree = (nodes: FileTreeNode[], limit: number): string => {
+  const lines: string[] = [];
+  let truncated = false;
+  const visit = (node: FileTreeNode, depth: number) => {
+    if (lines.length >= limit) {
+      truncated = true;
+      return;
+    }
+
+    lines.push(`${"  ".repeat(depth)}- ${node.path}${node.blocked ? " (blocked)" : ""}`);
+    node.children?.forEach((child) => visit(child, depth + 1));
+  };
+
+  nodes.forEach((node) => visit(node, 0));
+  if (truncated) {
+    lines.push(`... truncated at ${limit} entries`);
+  }
+  return lines.join("\n");
+};
 
 const buildSafetyInstructions = (card: KanbanCard, workspace: Workspace): string => {
   const safety = card.safetySettings;

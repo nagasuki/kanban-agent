@@ -7,8 +7,8 @@ import type { Workspace } from "../../domain/types";
 interface PlanPromptModalProps {
   isGenerating: boolean;
   onClose: () => void;
-  onManualSubmit: (prompt: string, options: CreatePlanCardOptions) => void;
-  onSubmit: (prompt: string, options: CreatePlanCardOptions) => void;
+  onManualSubmit: (prompt: string, options: CreatePlanCardOptions) => void | Promise<void>;
+  onSubmit: (prompt: string, options: CreatePlanCardOptions) => void | Promise<void>;
   workspace: Workspace;
 }
 

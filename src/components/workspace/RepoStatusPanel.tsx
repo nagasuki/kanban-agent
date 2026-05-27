@@ -1,5 +1,6 @@
 import { GitBranch, RefreshCw, Search } from "lucide-react";
 import type { RepoInspection } from "../../domain/types";
+import { BranchSelect } from "./BranchSelect";
 
 interface RepoStatusPanelProps {
   inspection: RepoInspection | undefined;
@@ -9,11 +10,11 @@ interface RepoStatusPanelProps {
 }
 
 export const RepoStatusPanel = ({ inspection, onRefresh, onSelectFolder, onSwitchBranch }: RepoStatusPanelProps) => {
-  const hasBranches = Boolean(inspection?.branches.length);
   const branchOptions =
     inspection && inspection.currentBranch && !inspection.branches.includes(inspection.currentBranch)
       ? [inspection.currentBranch, ...inspection.branches]
       : inspection?.branches ?? [];
+  const hasBranches = branchOptions.length > 0;
 
   return (
     <section className="repo-panel">
@@ -43,21 +44,16 @@ export const RepoStatusPanel = ({ inspection, onRefresh, onSelectFolder, onSwitc
             <span>{new Date(inspection.scannedAt).toLocaleTimeString()}</span>
           </div>
 
-          <label>
-            Branch
-            <select
-              disabled={!hasBranches}
-              value={inspection.currentBranch}
-              onChange={(event) => onSwitchBranch(event.target.value)}
-            >
-              {hasBranches ? null : <option value="">No branches detected</option>}
-              {branchOptions.map((branch) => (
-                <option key={branch} value={branch}>
-                  {branch}
-                </option>
-              ))}
-            </select>
-          </label>
+          <BranchSelect
+            branches={branchOptions}
+            disabled={!hasBranches}
+            value={inspection.currentBranch}
+            onChange={(branch) => {
+              if (branch && branch !== inspection.currentBranch) {
+                onSwitchBranch(branch);
+              }
+            }}
+          />
         </>
       ) : (
         <p className="helper-text">Select a project folder to auto-detect Git or Plastic, branches, files, and status.</p>

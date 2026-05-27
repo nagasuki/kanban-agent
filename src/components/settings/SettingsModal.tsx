@@ -9,6 +9,7 @@ import { AgentEditor } from "../agents/AgentEditor";
 import { CliToolEditor } from "../cli/CliToolEditor";
 import { ModelEditor } from "../models/ModelEditor";
 import { SkillEditor } from "../skills/SkillEditor";
+import { BranchSelect } from "../workspace/BranchSelect";
 import { RepoStatusPanel } from "../workspace/RepoStatusPanel";
 
 interface SettingsModalProps {
@@ -135,10 +136,11 @@ const WorkspaceSettings = ({
   onSwitchBranch,
   onUpdateWorkspace
 }: SettingsModalProps) => {
-  const branchOptions =
-    activeWorkspace.repoInspection?.branches.includes(activeWorkspace.defaultBranch)
-      ? activeWorkspace.repoInspection.branches
-      : [activeWorkspace.defaultBranch, ...(activeWorkspace.repoInspection?.branches ?? [])].filter(Boolean);
+  const branchOptions = [
+    activeWorkspace.repoInspection?.currentBranch,
+    activeWorkspace.defaultBranch,
+    ...(activeWorkspace.repoInspection?.branches ?? [])
+  ].filter((branch, index, options): branch is string => Boolean(branch) && options.indexOf(branch) === index);
   const planAgents = planAgentsForWorkspace(activeWorkspace);
   const implementAgents = implementAgentsForWorkspace(activeWorkspace);
 
@@ -218,30 +220,17 @@ const WorkspaceSettings = ({
     />
 
     <div className="settings-form-grid">
-      <label>
-        Branch
-        <select
-          value={activeWorkspace.defaultBranch}
-          onChange={(event) => {
-            const branch = event.target.value;
-            onUpdateWorkspace({ defaultBranch: branch });
-            if (branch && branch !== activeWorkspace.repoInspection?.currentBranch) {
-              onSwitchBranch(branch);
-            }
-          }}
-        >
-          <option value={activeWorkspace.defaultBranch || ""}>
-            {activeWorkspace.defaultBranch || "No branch detected"}
-          </option>
-          {branchOptions
-            .filter((branch, index, options) => options.indexOf(branch) === index && branch !== activeWorkspace.defaultBranch)
-            .map((branch) => (
-              <option key={branch} value={branch}>
-                {branch}
-              </option>
-            ))}
-        </select>
-      </label>
+      <BranchSelect
+        branches={branchOptions}
+        disabled={branchOptions.length === 0}
+        value={activeWorkspace.defaultBranch || activeWorkspace.repoInspection?.currentBranch || ""}
+        onChange={(branch) => {
+          onUpdateWorkspace({ defaultBranch: branch });
+          if (branch && branch !== activeWorkspace.repoInspection?.currentBranch) {
+            onSwitchBranch(branch);
+          }
+        }}
+      />
       <label>
         Default model
         <select

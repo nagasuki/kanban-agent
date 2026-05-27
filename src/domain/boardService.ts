@@ -13,6 +13,7 @@ import type {
   AgentChoiceQuestion,
   ImplementationSession,
   KanbanCard,
+  ProjectContext,
   ProviderUsageRecord,
   SessionRetryMode,
   ValidationResult,
@@ -35,6 +36,7 @@ export interface CreatePlanCardOptions {
   runnerType?: KanbanCard["runnerType"];
   modelProfileId?: string;
   cliToolProfileId?: string;
+  projectContext?: Partial<ProjectContext>;
 }
 
 export const createCard = (workspace: Workspace, columnId: BoardColumnId): Workspace => {
@@ -135,6 +137,7 @@ export const createPlanCardFromPrompt = (
     rejectCount: 0,
     projectContext: {
       ...createDefaultProjectContext(workspace.repoPath),
+      ...options.projectContext,
       extraPromptNotes: cleanPrompt
     },
     safetySettings: createDefaultSafetySettings(),
@@ -670,6 +673,49 @@ export const cancelExecution = (workspace: Workspace, cardId: string): Workspace
   };
 };
 
+export const pauseExecution = (workspace: Workspace, cardId: string, guidance = ""): Workspace => {
+  const timestamp = nowIso();
+  const cleanGuidance = guidance.trim();
+  const log = createLogEntry(cleanGuidance ? `Session paused: ${cleanGuidance}` : "Session paused for user guidance", "warning");
+  return {
+    ...workspace,
+    cards: workspace.cards.map((card) =>
+      card.id === cardId
+        ? {
+            ...card,
+            locked: false,
+            pendingAgentQuestion: undefined,
+            projectContext: cleanGuidance
+              ? {
+                  ...card.projectContext,
+                  extraPromptNotes: [card.projectContext.extraPromptNotes, `Resume guidance: ${cleanGuidance}`].filter(Boolean).join("\n\n")
+                }
+              : card.projectContext,
+            sessions: card.sessions.map((session) =>
+              session.id === card.activeSessionId
+                ? {
+                    ...session,
+                    status: "paused",
+                    currentStep: "Paused for user guidance",
+                    logs: [...session.logs, log],
+                    durationSeconds: Math.max(
+                      0,
+                      Math.round((new Date(timestamp).getTime() - new Date(session.startedAt).getTime()) / 1000)
+                    ),
+                    completedAt: timestamp,
+                    updatedAt: timestamp
+                  }
+                : session
+            ),
+            activityLog: [...card.activityLog, log],
+            updatedAt: timestamp
+          }
+        : card
+    ),
+    updatedAt: timestamp
+  };
+};
+
 export const startPlanOnlyExecution = (
   workspace: Workspace,
   cardId: string,
@@ -1034,7 +1080,7 @@ const startImplementationSession = (
     return { workspace };
   }
 
-  if (card.columnId !== "start-implement") {
+  if (card.columnId !== "start-implement" && !(card.columnId === "in-process" && retryMode === "continue")) {
     return {
       workspace: appendCardLog(workspace, cardId, "Implementation can only start from Start Implement", "warning"),
       warning: "Move the card to Start Implement before starting a session."

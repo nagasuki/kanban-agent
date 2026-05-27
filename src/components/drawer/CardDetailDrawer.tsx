@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { AlertTriangle, Copy, Play, RotateCcw, Send, ShieldCheck, Trash2, Undo2, X } from "lucide-react";
+import { AlertTriangle, Copy, PauseCircle, Play, RotateCcw, Send, ShieldCheck, Trash2, Undo2, X } from "lucide-react";
 import { BOARD_COLUMNS, EXECUTION_MODES, TASK_PRIORITIES } from "../../domain/constants";
 import { buildExecutionPreview } from "../../domain/executionService";
 import { buildAgentPrompt } from "../../domain/promptBuilder";
@@ -20,6 +20,7 @@ interface CardDetailModalProps {
   onReviewAction: (cardId: string, action: "approve" | "request-changes" | "retry" | "rollback") => void;
   onSimulateExecution: (cardId: string) => void;
   onCancelExecution: (cardId: string) => void;
+  onPauseExecution: (cardId: string) => void;
   onAnswerAgentQuestion: (cardId: string, answer: string) => void;
   onRunPlanOnly: (cardId: string, retryMode?: SessionRetryMode) => void;
   onLoadAttachedFiles: (cardId: string) => void;
@@ -62,6 +63,7 @@ export const CardDetailModal = ({
   onReviewAction,
   onSimulateExecution,
   onCancelExecution,
+  onPauseExecution,
   onAnswerAgentQuestion,
   onRunPlanOnly,
   onLoadAttachedFiles,
@@ -204,6 +206,12 @@ export const CardDetailModal = ({
           <button type="button" onClick={() => startSession("fresh")}>
             <Play size={15} />
             Implement
+          </button>
+        ) : null}
+        {card.columnId === "in-process" ? (
+          <button type="button" onClick={() => onPauseExecution(card.id)}>
+            <PauseCircle size={15} />
+            Pause
           </button>
         ) : null}
         {card.columnId === "in-process" ? (
@@ -495,6 +503,32 @@ export const CardDetailModal = ({
             />
           </label>
         </div>
+        {card.projectContext.autoAttachedContextFiles.length || card.projectContext.suggestedContextFiles.length ? (
+          <div className="context-suggestion-panel">
+            {card.projectContext.autoAttachedContextFiles.length ? (
+              <div>
+                <strong>Auto attached</strong>
+                <div className="context-chip-row">
+                  {card.projectContext.autoAttachedContextFiles.map((file) => (
+                    <span className="chip success-text" key={file}>{file}</span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {card.projectContext.suggestedContextFiles.length ? (
+              <div>
+                <strong>Suggested context</strong>
+                <div className="context-chip-row">
+                  {card.projectContext.suggestedContextFiles.map((file) => (
+                    <button key={file} type="button" onClick={() => attachFile(file)}>
+                      {file}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <label>
           Related documents
           <input

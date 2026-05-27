@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, FileCheck2, Play, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileCheck2, PauseCircle, Play, ShieldCheck, XCircle } from "lucide-react";
 import { BOARD_COLUMNS } from "../../domain/constants";
 import type { ImplementationSession, KanbanCard, Workspace } from "../../domain/types";
 
@@ -12,6 +12,7 @@ interface KanbanCardItemProps {
   isSelected: boolean;
   onApplyPatch: (cardId: string) => void;
   onCancelCard: (cardId: string) => void;
+  onPauseCard: (cardId: string) => void;
   onDragEnd: () => void;
   onDragOverCard: (cardId: string, position: "before" | "after") => void;
   onDragStart: (cardId: string) => void;
@@ -28,6 +29,7 @@ export const KanbanCardItem = ({
   isSelected,
   onApplyPatch,
   onCancelCard,
+  onPauseCard,
   onDragEnd,
   onDragOverCard,
   onDragStart,
@@ -126,6 +128,10 @@ export const KanbanCardItem = ({
             <span>Cost: {formatCost(latestSession)}</span>
           </div>
           <div className="card-inline-actions">
+            <button type="button" onClick={(event) => stopAndRun(event, () => onPauseCard(card.id))}>
+              <PauseCircle size={13} />
+              Pause
+            </button>
             <button type="button" onClick={(event) => stopAndRun(event, () => onCancelCard(card.id))}>
               <XCircle size={13} />
               Cancel

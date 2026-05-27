@@ -21,7 +21,7 @@ export type DetectedVersionControlProvider = "git" | "plastic" | "none";
 
 export type TaskPriority = "Critical" | "High" | "Normal" | "Low";
 
-export type SessionStatus = "running" | "completed" | "approved" | "rejected" | "cancelled" | "failed";
+export type SessionStatus = "running" | "paused" | "completed" | "approved" | "rejected" | "cancelled" | "failed";
 
 export type SessionRetryMode = "fresh" | "continue";
 
@@ -160,6 +160,8 @@ export interface ProjectContext {
   relatedDocuments: string;
   relatedIssueLink: string;
   attachedFileContext: string;
+  suggestedContextFiles: string[];
+  autoAttachedContextFiles: string[];
   extraPromptNotes: string;
   notes: string;
 }

@@ -41,6 +41,8 @@ export const createDefaultProjectContext = (repoPath = ""): ProjectContext => ({
   relatedDocuments: "",
   relatedIssueLink: "",
   attachedFileContext: "",
+  suggestedContextFiles: [],
+  autoAttachedContextFiles: [],
   extraPromptNotes: "",
   notes: ""
 });
