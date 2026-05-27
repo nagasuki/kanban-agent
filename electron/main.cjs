@@ -1,7 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, shell } = require("electron");
 const { execFileSync, spawn } = require("child_process");
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 
 const secretsFilePath = () => path.join(app.getPath("userData"), "secure-api-keys.json");
@@ -752,27 +751,17 @@ const registerRepoHandlers = () => {
       return { ok: false, output: `${blockedFile} is blocked by workspace safety settings.`, backupPath: "" };
     }
 
-    const backupPath = createPatchBackup(repoPath, touchedFiles);
     if (provider === "plastic") {
-      const patchFile = writeTempPatchFile(patchText);
-      const apply = await runCommand("cm", ["patch", "--apply", patchFile], repoPath, "", 120000);
-      try {
-        fs.rmSync(path.dirname(patchFile), { recursive: true, force: true });
-      } catch {
-        // Best effort cleanup only.
-      }
-
+      const backupPath = createPatchBackup(repoPath, touchedFiles);
+      const apply = applyUnifiedPatchToWorkspace(repoPath, patchText);
       return {
         ok: apply.ok,
-        output:
-          [apply.stdout, apply.stderr].filter(Boolean).join("\n") ||
-          (apply.ok
-            ? "Plastic patch applied."
-            : "Plastic patch apply failed. Make sure Unity Version Control CLI and GNU patch are available in PATH."),
+        output: apply.output,
         backupPath
       };
     }
 
+    const backupPath = createPatchBackup(repoPath, touchedFiles);
     const check = await runCommand("git", ["-C", repoPath, "apply", "--check", "--recount"], repoPath, patchText, 30000);
     if (!check.ok) {
       return { ok: false, output: check.stderr || check.stdout || "Patch check failed.", backupPath };
@@ -1035,13 +1024,6 @@ const parseHunkCounts = (line) => {
   };
 };
 
-const writeTempPatchFile = (patchText) => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kanban-agent-patch-"));
-  const patchFile = path.join(directory, "changes.patch");
-  fs.writeFileSync(patchFile, patchText, "utf8");
-  return patchFile;
-};
-
 const createPatchBackup = (repoPath, files) => {
   const backupRoot = path.join(app.getPath("userData"), "backups", `${Date.now()}`);
   for (const file of files) {
@@ -1056,6 +1038,220 @@ const createPatchBackup = (repoPath, files) => {
   }
 
   return backupRoot;
+};
+
+const applyUnifiedPatchToWorkspace = (repoPath, patchText) => {
+  try {
+    const files = parseUnifiedPatch(patchText);
+    if (files.length === 0) {
+      return { ok: false, output: "No file patches were found." };
+    }
+
+    const changes = files.map((filePatch) => buildPatchedFile(repoPath, filePatch));
+    for (const change of changes) {
+      if (change.deleteFile) {
+        if (fs.existsSync(change.absolutePath)) {
+          fs.unlinkSync(change.absolutePath);
+        }
+        continue;
+      }
+
+      fs.mkdirSync(path.dirname(change.absolutePath), { recursive: true });
+      fs.writeFileSync(change.absolutePath, change.content, "utf8");
+    }
+
+    return {
+      ok: true,
+      output: `Patch applied directly to ${changes.length} file${changes.length === 1 ? "" : "s"}. Plastic will detect the workspace changes.`
+    };
+  } catch (error) {
+    return { ok: false, output: error instanceof Error ? error.message : "Patch apply failed." };
+  }
+};
+
+const parseUnifiedPatch = (patchText) => {
+  const files = [];
+  let current = null;
+  let currentHunk = null;
+
+  const finishFile = () => {
+    if (!current) {
+      return;
+    }
+    if ((current.oldPath || current.newPath) && current.hunks.length > 0) {
+      files.push(current);
+    }
+    current = null;
+    currentHunk = null;
+  };
+
+  for (const line of patchText.split(/\r?\n/)) {
+    if (line.startsWith("diff --git ")) {
+      finishFile();
+      const parts = line.trim().split(/\s+/);
+      current = createFilePatch(parts[2], parts[3]);
+      continue;
+    }
+
+    if (line.startsWith("Index: ")) {
+      finishFile();
+      current = createFilePatch(line.slice("Index: ".length), line.slice("Index: ".length));
+      continue;
+    }
+
+    if (!current && line.startsWith("--- ")) {
+      current = createFilePatch("", "");
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    if (line.startsWith("--- ")) {
+      current.oldPath = normalizePatchHeaderPath(line.slice("--- ".length));
+      continue;
+    }
+
+    if (line.startsWith("+++ ")) {
+      current.newPath = normalizePatchHeaderPath(line.slice("+++ ".length));
+      continue;
+    }
+
+    if (line.startsWith("@@ ")) {
+      const hunk = parseUnifiedHunkHeader(line);
+      current.hunks.push(hunk);
+      currentHunk = hunk;
+      continue;
+    }
+
+    if (!currentHunk) {
+      continue;
+    }
+
+    if (line.startsWith("\\ ")) {
+      currentHunk.noNewlineAtEnd = true;
+      continue;
+    }
+
+    if (/^[ +\-]/.test(line)) {
+      currentHunk.lines.push({ op: line[0], text: line.slice(1) });
+    }
+  }
+
+  finishFile();
+  return files;
+};
+
+const createFilePatch = (oldPath, newPath) => ({
+  oldPath: normalizePatchHeaderPath(oldPath),
+  newPath: normalizePatchHeaderPath(newPath),
+  hunks: []
+});
+
+const normalizePatchHeaderPath = (value) => {
+  const clean = String(value || "")
+    .trim()
+    .replace(/^"|"$/g, "")
+    .split(/\t|\s+\d{4}-\d{2}-\d{2}/)[0]
+    .trim();
+  if (!clean || clean === "/dev/null") {
+    return "";
+  }
+  return clean.replace(/^[ab]\//, "").replaceAll("\\", "/");
+};
+
+const parseUnifiedHunkHeader = (line) => {
+  const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+  if (!match) {
+    throw new Error(`Invalid patch hunk header: ${line}`);
+  }
+
+  return {
+    oldStart: Number.parseInt(match[1], 10),
+    oldCount: Number.parseInt(match[2] ?? "1", 10),
+    newStart: Number.parseInt(match[3], 10),
+    newCount: Number.parseInt(match[4] ?? "1", 10),
+    lines: [],
+    noNewlineAtEnd: false
+  };
+};
+
+const buildPatchedFile = (repoPath, filePatch) => {
+  const relativePath = validatePatchRelativePath(filePatch.newPath || filePatch.oldPath);
+  const absolutePath = resolveRepoFile(repoPath, relativePath);
+  const originalContent = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, "utf8") : "";
+  const newline = originalContent.includes("\r\n") ? "\r\n" : "\n";
+  const originalLines = splitContentLines(originalContent);
+  const patchedLines = [];
+  let originalIndex = 0;
+
+  for (const hunk of filePatch.hunks) {
+    const hunkStart = Math.max(hunk.oldStart - 1, 0);
+    if (hunkStart < originalIndex) {
+      throw new Error(`${relativePath}: overlapping hunk at original line ${hunk.oldStart}.`);
+    }
+
+    patchedLines.push(...originalLines.slice(originalIndex, hunkStart));
+    originalIndex = hunkStart;
+
+    for (const line of hunk.lines) {
+      if (line.op === " ") {
+        assertPatchLineMatches(relativePath, originalLines[originalIndex], line.text, originalIndex + 1);
+        patchedLines.push(line.text);
+        originalIndex += 1;
+      } else if (line.op === "-") {
+        assertPatchLineMatches(relativePath, originalLines[originalIndex], line.text, originalIndex + 1);
+        originalIndex += 1;
+      } else if (line.op === "+") {
+        patchedLines.push(line.text);
+      }
+    }
+  }
+
+  patchedLines.push(...originalLines.slice(originalIndex));
+
+  return {
+    absolutePath,
+    content: patchedLines.length > 0 ? `${patchedLines.join(newline)}${newline}` : "",
+    deleteFile: !filePatch.newPath
+  };
+};
+
+const splitContentLines = (content) => {
+  if (!content) {
+    return [];
+  }
+
+  const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = normalized.split("\n");
+  if (normalized.endsWith("\n")) {
+    lines.pop();
+  }
+  return lines;
+};
+
+const assertPatchLineMatches = (relativePath, actual, expected, lineNumber) => {
+  if (actual !== expected) {
+    throw new Error(`${relativePath}: patch context mismatch at line ${lineNumber}.`);
+  }
+};
+
+const validatePatchRelativePath = (relativePath) => {
+  const clean = String(relativePath || "").replaceAll("\\", "/");
+  if (!clean || path.isAbsolute(clean) || clean.split("/").includes("..")) {
+    throw new Error(`Unsafe patch path: ${relativePath || "(empty)"}.`);
+  }
+  return clean;
+};
+
+const resolveRepoFile = (repoPath, relativePath) => {
+  const resolvedRepo = path.resolve(repoPath);
+  const absolutePath = path.resolve(resolvedRepo, relativePath);
+  const relativeFromRepo = path.relative(resolvedRepo, absolutePath);
+  if (relativeFromRepo.startsWith("..") || path.isAbsolute(relativeFromRepo)) {
+    throw new Error(`Patch path escapes the workspace: ${relativePath}.`);
+  }
+  return absolutePath;
 };
 
 const activeProviderProcesses = new Map();
